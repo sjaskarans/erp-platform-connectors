@@ -1,0 +1,17 @@
+{
+  "objects": {
+    "finance_lines": {
+      "catalog": "erp_analytics",
+      "schema": "approved",
+      "name": "finance_lines",
+      "preview_columns": ["company_code", "fiscal_year", "document_id", "amount", "currency"]
+    }
+  },
+  "queries": {
+    "finance_by_currency": {
+      "statement": "SELECT currency, SUM(amount) AS amount FROM erp_analytics.approved.finance_lines WHERE company_code = :company_code GROUP BY currency",
+      "parameters": [{"name": "company_code", "type": "STRING"}]
+    }
+  },
+  "limits": {"max_rows": 1000, "max_bytes": 4000000, "timeout_seconds": 120}
+}

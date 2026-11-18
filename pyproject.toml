@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "erp-platform-connectors"
+version = "0.1.0"
+description = "Read-only connectors for the governed ERP intelligence platform"
+requires-python = ">=3.11"
+dependencies = ["databricks-sdk==0.168.0", "duckdb==1.5.6", "fastapi==0.163.2", "uvicorn==0.54.0"]
+
+[project.scripts]
+erp-connector = "erp_connectors.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
