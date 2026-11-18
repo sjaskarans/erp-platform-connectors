@@ -1,8 +1,9 @@
 # ERP platform connectors
 
 Python connector implementation for the existing ERP data used by the governed
-intelligence platform. The first target is **Google Cloud Databricks with Unity Catalog**.
-Snowflake, Redshift, and direct SAP connectors are subsequent, separate steps.
+intelligence platform. Implemented targets are **Google Cloud Databricks with
+Unity Catalog** and **Snowflake with service-user RSA key-pair authentication**.
+Redshift and direct SAP connectors are subsequent, separate steps.
 
 The connector retrieves metadata and data. Metric definitions, join inference,
 semantic compilation, AI, dashboards, and ERP write-back are outside this package.
@@ -10,6 +11,7 @@ semantic compilation, AI, dashboards, and ERP write-back are outside this packag
 ## First delivery
 
 - Explicit service-principal OAuth authentication through the official SDK.
+- Snowflake service-user key-pair authentication through the official Python driver.
 - Connection check against a configured SQL warehouse.
 - Column metadata for approved objects, including comments and source types.
 - Optional previews restricted to explicitly approved columns.
@@ -35,6 +37,8 @@ arbitrary SQL through these endpoints.
 For a user-facing setup screen, run `python -m erp_connectors.demo --ui` with the
 project's Python environment. Open `http://127.0.0.1:3000` to add, edit, test, or
 preview your own named connections. See [the connection UI guide](docs/connection-ui.md).
+Select Databricks or Snowflake when adding a connection. Snowflake's identity,
+permissions, CLI, and test-data setup are covered in [the Snowflake guide](docs/snowflake-setup.md).
 Saved profiles use Windows-encrypted secrets and are local to this deployment;
 this is not a hosted multi-tenant service yet.
 

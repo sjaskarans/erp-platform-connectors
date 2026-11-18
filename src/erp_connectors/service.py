@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from .models import ConnectorError
-from .connections import ConnectionInput, ConnectionStore, runtime_connector
+from .connections import ConnectionPayload, ConnectionStore, runtime_connector
 
 
 class QueryInput(BaseModel):
@@ -33,6 +33,9 @@ def create_app(connector=None):
         elif mode == "databricks":
             from .cli import load_connector
             connector = load_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
+        elif mode == "snowflake":
+            from .cli import load_snowflake_connector
+            connector = load_snowflake_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
         else:
             raise RuntimeError("Unknown connector mode")
 
@@ -63,20 +66,22 @@ def create_app(connector=None):
         return {"connections": store.list()}
 
     @app.post("/v1/connections", status_code=201)
-    def create_connection(body: ConnectionInput):
+    def create_connection(body: ConnectionPayload):
         try:
             return store.save(body)
         except ValueError:
-            raise HTTPException(400, "A client secret is required") from None
+            raise HTTPException(400, "Check the service credentials and private-key passphrase") from None
         except RuntimeError:
             raise HTTPException(503, "Windows secret protection is unavailable") from None
 
     @app.put("/v1/connections/{connection_id}")
-    def update_connection(connection_id: str, body: ConnectionInput):
+    def update_connection(connection_id: str, body: ConnectionPayload):
         try:
             return store.save(body, connection_id)
         except KeyError:
             raise HTTPException(404, "Connection not found") from None
+        except ValueError:
+            raise HTTPException(400, "Check the credentials or create a separate profile for another platform") from None
         except RuntimeError:
             raise HTTPException(503, "Windows secret protection is unavailable") from None
 

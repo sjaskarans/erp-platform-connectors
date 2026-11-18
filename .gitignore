@@ -21,3 +21,5 @@ frontend/tsconfig.tsbuildinfo
 *.key
 *.p12
 *.pfx
+*.p8
+*.der

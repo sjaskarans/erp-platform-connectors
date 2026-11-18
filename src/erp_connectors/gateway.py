@@ -10,7 +10,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .service import QueryInput
-from .connections import ConnectionInput
+from .connections import ConnectionPayload, connection_request_body
 
 
 def create_app():
@@ -71,17 +71,14 @@ def create_app():
         return forward("GET", "/v1/connections")
 
     def connection_body(body):
-        values = body.model_dump(exclude={"client_secret"})
-        if body.client_secret:
-            values["client_secret"] = body.client_secret.get_secret_value()
-        return values
+        return connection_request_body(body)
 
     @app.post("/v1/connections", status_code=201)
-    def create_connection(body: ConnectionInput):
+    def create_connection(body: ConnectionPayload):
         return forward("POST", "/v1/connections", connection_body(body))
 
     @app.put("/v1/connections/{connection_id}")
-    def update_connection(connection_id: str, body: ConnectionInput):
+    def update_connection(connection_id: str, body: ConnectionPayload):
         from urllib.parse import quote
         return forward("PUT", f"/v1/connections/{quote(connection_id, safe='')}", connection_body(body))
 

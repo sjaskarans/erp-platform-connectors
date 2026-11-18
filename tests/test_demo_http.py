@@ -132,6 +132,23 @@ class DemoHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("sensitive-do-not-echo", response.text)
 
+    def test_snowflake_key_profile_through_gateway(self):
+        from erp_connectors.connections import connection_request_body
+        from test_snowflake_profiles import snowflake_profile
+        values = connection_request_body(snowflake_profile())
+        response = requests.post(self.url + "/v1/connections", headers=self.headers,
+                                 json=values, timeout=5, proxies={"http": "", "https": ""})
+        self.assertEqual(response.status_code, 201, response.text)
+        created = response.json()
+        self.assertEqual(created["platform"], "snowflake")
+        self.assertEqual(created["status"], "saved")
+        for forbidden in ("private_key_pem", "private_key_passphrase", "BEGIN ENCRYPTED", "offline-test-passphrase"):
+            self.assertNotIn(forbidden, response.text)
+            self.assertNotIn(forbidden, self.get("/v1/connections").text)
+        removed = requests.delete(self.url + "/v1/connections/" + created["id"],
+                                  headers=self.headers, timeout=5, proxies={"http": "", "https": ""})
+        self.assertEqual(removed.status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

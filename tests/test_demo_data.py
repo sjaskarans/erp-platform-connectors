@@ -67,6 +67,26 @@ class DemoDataTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.connector.execute("finance_by_currency", {"company_code": "1000", "sql": "SELECT 1"})
 
+    def test_generated_snowflake_queries_reconcile_against_same_fixture(self):
+        from erp_connectors.snowflake import parameter
+        with tempfile.TemporaryDirectory() as directory:
+            generate("ERP_DEMO", "erp_connector_demo_v1", Path(directory), "snowflake")
+            config = json.loads((Path(directory) / "connector.demo.json").read_text())
+            expected = json.loads((Path(directory) / "expected.json").read_text())
+            sql = (Path(directory) / "setup.sql").read_text()
+        self.assertEqual(sql.count("CREATE TABLE"), 9)
+        self.assertNotIn("USING DELTA", sql)
+        for name, query in config["queries"].items():
+            self.assertNotIn(":company_code", query["statement"])
+            values = {"company_code": "1000", "as_of_date": "2026-11-18"}
+            bindings = [parameter(values[p["name"]], p["type"]) for p in query["parameters"]]
+            rows = self.connector.db.execute(query["statement"], bindings).fetchall()
+            reference = expected["company_1000"][name]
+            self.assertEqual(len(rows), len(reference))
+            for actual, target in zip(rows, reference):
+                self.assertEqual(actual[0], target[0])
+                self.assertEqual([Decimal(str(v)) for v in actual[1:]], [Decimal(v) for v in target[1:]])
+
 
 if __name__ == "__main__":
     unittest.main()

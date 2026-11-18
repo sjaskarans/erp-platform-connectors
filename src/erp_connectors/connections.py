@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
@@ -43,6 +44,7 @@ class ObjectInput(BaseModel):
 
 class ConnectionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+    platform: Literal["databricks"] = "databricks"
     name: str = Field(min_length=1, max_length=100)
     workspace_url: str = Field(max_length=255)
     warehouse_id: str = Field(pattern=r"^[a-fA-F0-9]{8,64}$")
@@ -79,6 +81,63 @@ class ConnectionInput(BaseModel):
         if len({obj.name for obj in objects}) != len(objects):
             raise ValueError("Object labels must be unique")
         return objects
+
+
+class SnowflakeConnectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    platform: Literal["snowflake"]
+    name: str = Field(min_length=1, max_length=100)
+    account: str = Field(min_length=3, max_length=255, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]*[A-Za-z0-9]$")
+    warehouse: str = Field(min_length=1, max_length=255)
+    username: str = Field(min_length=1, max_length=255)
+    role: str = Field(min_length=1, max_length=255)
+    private_key_pem: SecretStr | None = Field(default=None, max_length=16000)
+    private_key_passphrase: SecretStr | None = Field(default=None, max_length=4096)
+    objects: list[ObjectInput] = Field(min_length=1, max_length=30)
+
+    _name = field_validator("name")(ConnectionInput.display_name.__func__)
+    _objects = field_validator("objects")(ConnectionInput.unique_objects.__func__)
+
+    @field_validator("warehouse", "username", "role")
+    @classmethod
+    def identifier(cls, value):
+        if not value.strip() or any(ord(c) < 32 for c in value):
+            raise ValueError("Invalid Snowflake name")
+        return value.strip()
+
+    @field_validator("account")
+    @classmethod
+    def account_identifier(cls, value):
+        if ".." in value or value.endswith(".snowflakecomputing.com"):
+            raise ValueError("Use an account identifier, not a URL or hostname")
+        return value
+
+
+ConnectionPayload = ConnectionInput | SnowflakeConnectionInput
+SECRET_FIELDS = {"client_secret", "private_key_pem", "private_key_passphrase"}
+
+
+def private_key_der(pem: str, passphrase: str | None = None) -> bytes:
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+    try:
+        key = serialization.load_pem_private_key(pem.encode(), password=passphrase.encode() if passphrase else None)
+        if not isinstance(key, RSAPrivateKey) or key.key_size < 2048:
+            raise ValueError("Use RSA with at least 2048 bits")
+        return key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                                 serialization.NoEncryption())
+    except Exception:
+        raise ValueError("Invalid RSA private key or passphrase") from None
+
+
+def connection_request_body(value: ConnectionPayload) -> dict:
+    """Private wire payload for gateway→connector; never use as a public DTO."""
+    result = value.model_dump(exclude=SECRET_FIELDS)
+    for name in SECRET_FIELDS:
+        secret = getattr(value, name, None)
+        if secret is not None:
+            result[name] = secret.get_secret_value()
+    return result
 
 
 class WindowsVault:
@@ -148,7 +207,9 @@ class ConnectionStore:
         return row
 
     def public(self, row):
-        return {"id": row["id"], **json.loads(row["config"]), "secret_configured": True,
+        config = json.loads(row["config"])
+        config.setdefault("platform", "databricks")
+        return {"id": row["id"], **config, "secret_configured": True,
                 "version": row["version"], "status": row["status"],
                 "checked_at": row["checked_at"], "error_code": row["error_code"]}
 
@@ -156,14 +217,26 @@ class ConnectionStore:
         with self._database() as db:
             return [self.public(row) for row in db.execute("SELECT * FROM connections ORDER BY created_at")]
 
-    def save(self, value: ConnectionInput, connection_id: str | None = None):
+    def save(self, value: ConnectionPayload, connection_id: str | None = None):
         with self.lock:
             existing = self._row(connection_id) if connection_id else None
-            secret = (self.vault.protect(value.client_secret.get_secret_value()) if value.client_secret
-                      else existing["secret"] if existing else None)
+            if existing and json.loads(existing["config"]).get("platform", "databricks") != value.platform:
+                raise ValueError("Create a separate profile to change platforms")
+            plaintext = None
+            if isinstance(value, SnowflakeConnectionInput):
+                if value.private_key_pem is not None:
+                    pem = value.private_key_pem.get_secret_value()
+                    password = value.private_key_passphrase.get_secret_value() if value.private_key_passphrase else None
+                    private_key_der(pem, password)
+                    plaintext = json.dumps({"private_key_pem": pem, "private_key_passphrase": password})
+                elif value.private_key_passphrase is not None:
+                    raise ValueError("Provide the key when replacing its passphrase")
+            elif value.client_secret:
+                plaintext = value.client_secret.get_secret_value()
+            secret = self.vault.protect(plaintext) if plaintext is not None else existing["secret"] if existing else None
             if secret is None:
-                raise ValueError("A client secret is required for a new connection")
-            config = value.model_dump(exclude={"client_secret"})
+                raise ValueError("Credentials are required for a new connection")
+            config = value.model_dump(exclude=SECRET_FIELDS)
             connection_id = connection_id or str(uuid.uuid4())
             with self._database() as db:
                 db.execute("""INSERT INTO connections VALUES (?, ?, ?, ?, 'saved', NULL, NULL, ?)
@@ -196,12 +269,26 @@ class ConnectionStore:
 
 
 def runtime_connector(config, secret):
+    objects = {obj["name"]: DataObject(obj["catalog"], obj["schema_name"], obj["table_name"],
+                                     tuple(obj["preview_columns"])) for obj in config["objects"]}
+    if config.get("platform") == "snowflake":
+        from .snowflake import SnowflakeConnector
+        import snowflake.connector
+        credentials = json.loads(secret)
+        key = private_key_der(credentials["private_key_pem"], credentials.get("private_key_passphrase"))
+        return SnowflakeConnector(lambda: snowflake.connector.connect(
+            account=config["account"], user=config["username"], warehouse=config["warehouse"],
+            role=config["role"], authenticator="SNOWFLAKE_JWT", private_key=key, paramstyle="qmark",
+            login_timeout=15, network_timeout=15, socket_timeout=15, client_session_keep_alive=False,
+            session_parameters={"STATEMENT_TIMEOUT_IN_SECONDS": 120, "QUERY_TAG": "erp-platform-connectors",
+                                "CLIENT_TELEMETRY_ENABLED": False},
+        ), objects)
+    if config.get("platform", "databricks") != "databricks":
+        raise ValueError("Unknown connection platform")
     from databricks.sdk import WorkspaceClient
     from databricks.sdk.core import Config
     client = WorkspaceClient(config=Config(
         host=config["workspace_url"], client_id=config["client_id"], client_secret=secret,
         auth_type="oauth-m2m", http_timeout_seconds=15, retry_timeout_seconds=15,
     ))
-    objects = {obj["name"]: DataObject(obj["catalog"], obj["schema_name"], obj["table_name"],
-                                     tuple(obj["preview_columns"])) for obj in config["objects"]}
     return DatabricksConnector(client.api_client, config["warehouse_id"], objects)

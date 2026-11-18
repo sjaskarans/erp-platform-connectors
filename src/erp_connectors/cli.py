@@ -60,11 +60,33 @@ def load_connector(path: str, *, client_secret: str | None = None) -> Databricks
     )
 
 
+def load_snowflake_connector(path: str, *, passphrase: str | None = None):
+    from .connections import SECRET_FIELDS, SnowflakeConnectionInput, runtime_connector
+    from .snowflake import SnowflakeConnector
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    pem = Path(os.environ["SNOWFLAKE_PRIVATE_KEY_FILE"]).read_text(encoding="utf-8")
+    password = passphrase if passphrase is not None else os.environ.get("SNOWFLAKE_PRIVATE_KEY_PASSPHRASE")
+    profile = SnowflakeConnectionInput(
+        platform="snowflake", name="CLI Snowflake", account=os.environ["SNOWFLAKE_ACCOUNT"],
+        warehouse=os.environ["SNOWFLAKE_WAREHOUSE"], username=os.environ["SNOWFLAKE_USER"],
+        role=os.environ["SNOWFLAKE_ROLE"], private_key_pem=pem, private_key_passphrase=password,
+        objects=[{"name": name, "catalog": obj["catalog"], "schema_name": obj["schema"],
+                  "table_name": obj["name"], "preview_columns": obj.get("preview_columns", [])}
+                 for name, obj in config["objects"].items()],
+    )
+    live = runtime_connector(profile.model_dump(exclude=SECRET_FIELDS),
+                             json.dumps({"private_key_pem": pem, "private_key_passphrase": password}))
+    queries = {name: QueryTemplate(value["statement"], tuple(Parameter(**p) for p in value.get("parameters", [])))
+               for name, value in config.get("queries", {}).items()}
+    return SnowflakeConnector(live.connection_factory, live.objects, queries, **config.get("limits", {}))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only ERP platform connector")
     parser.add_argument("--config", default="connector.local.json")
+    parser.add_argument("--platform", choices=["databricks", "snowflake"], default="databricks")
     parser.add_argument("--prompt-secret", action="store_true",
-                        help="Securely prompt for the OAuth M2M secret for this command")
+                        help="Prompt for the Databricks OAuth secret or Snowflake key passphrase")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check")
     commands.add_parser("discover")
@@ -80,8 +102,16 @@ def main() -> int:
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("erp_connectors").setLevel(logging.INFO)
     try:
-        secret = prompt_client_secret() if args.prompt_secret else None
-        connector = load_connector(args.config, client_secret=secret)
+        if args.platform == "snowflake":
+            password = None
+            if args.prompt_secret:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", getpass.GetPassWarning)
+                    password = getpass.getpass("Snowflake private-key passphrase (hidden): ")
+            connector = load_snowflake_connector(args.config, passphrase=password)
+        else:
+            secret = prompt_client_secret() if args.prompt_secret else None
+            connector = load_connector(args.config, client_secret=secret)
         if args.command == "check":
             output = asdict(connector.check_connection())
         elif args.command == "discover":

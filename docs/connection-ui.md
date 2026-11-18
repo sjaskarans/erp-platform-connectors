@@ -24,10 +24,12 @@ the Python installation from README and `npm install` in `frontend` first.
 ## Configure a connection
 
 1. Click **Add connection**.
-2. Name the profile and enter its exact Google Cloud Databricks workspace URL
-   and SQL warehouse ID.
-3. Enter the Databricks service principal's application/client ID and OAuth M2M
-   secret. This is not a Google service-account JSON key.
+2. Select **Databricks** or **Snowflake** and name the profile. Databricks uses
+   its workspace URL and warehouse ID; Snowflake uses its account identifier,
+   warehouse, and reader role.
+3. For Databricks, enter the service principal client ID and OAuth secret. For
+   Snowflake, enter the dedicated service username, RSA PEM private key, and its
+   passphrase. See [Snowflake setup](snowflake-setup.md) for identity provisioning.
 4. Register approved objects: a short object label, catalog, schema, and table
    or view. Add explicit preview columns if you want row previews; leave them
    blank to disable previews.
@@ -44,8 +46,10 @@ The status is deliberately explicit: **Saved · not tested**, **Verified**, or
 **Needs attention**. Verification checks a SQL connection and metadata for the
 configured objects; it is not proof of every database policy or query scenario.
 
-Use **Edit** to change a profile. An empty secret field retains the stored
-secret; entering a new value replaces it. Editing resets verification status.
+Use **Edit** to change a profile. An empty OAuth secret retains that secret; for
+Snowflake, leave both key and passphrase fields empty to retain the stored bundle.
+Provide the replacement key and passphrase together to rotate it. Editing resets
+verification status. Changing platforms requires a separate profile.
 Multiple profiles retain separate workspaces, warehouses, identities, secrets,
 and approved object lists. Removing a profile changes only local app state.
 
@@ -53,7 +57,7 @@ and approved object lists. Removing a profile changes only local app state.
 
 - Profile metadata is persisted in the ignored
   `.local-connections/profiles.sqlite3` file.
-- OAuth secrets are encrypted with Windows DPAPI for the account running the
+- OAuth secrets and Snowflake key/passphrase bundles are encrypted with Windows DPAPI for the account running the
   backend. They cannot be decrypted simply by copying this database to another
   Windows account or computer under the normal DPAPI user-protection model.
 - A typed secret is temporarily present in the browser form and its POST/PUT

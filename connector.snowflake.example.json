@@ -1,0 +1,16 @@
+{
+  "objects": {
+    "finance_lines": {"catalog": "ERP_DEMO", "schema": "ERP_CONNECTOR_DEMO_V1", "name": "FINANCE_LINES", "preview_columns": ["COMPANY_CODE", "AMOUNT", "CURRENCY"]}
+  },
+  "queries": {
+    "finance_by_currency": {
+      "statement": "SELECT CURRENCY, SUM(AMOUNT) AS AMOUNT FROM ERP_DEMO.ERP_CONNECTOR_DEMO_V1.FINANCE_LINES WHERE COMPANY_CODE = ? GROUP BY CURRENCY ORDER BY CURRENCY",
+      "parameters": [{"name": "company_code", "type": "STRING"}]
+    },
+    "overdue_receivables": {
+      "statement": "SELECT CURRENCY, SUM(OUTSTANDING_AMOUNT) AS AMOUNT FROM ERP_DEMO.ERP_CONNECTOR_DEMO_V1.RECEIVABLES WHERE COMPANY_CODE = ? AND DUE_DATE < ? AND OUTSTANDING_AMOUNT > 0 AND DISPUTED = FALSE GROUP BY CURRENCY ORDER BY CURRENCY",
+      "parameters": [{"name": "company_code", "type": "STRING"}, {"name": "as_of_date", "type": "DATE"}]
+    }
+  },
+  "limits": {"max_rows": 1000, "max_bytes": 4000000, "timeout_seconds": 120}
+}
