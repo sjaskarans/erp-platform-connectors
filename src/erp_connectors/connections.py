@@ -301,6 +301,7 @@ class ConnectionStore:
         statements.extend(dict.fromkeys(grants))
         return {"connection_id": connection_id, "version": version, "public_key": public_key,
                 "fingerprint": "SHA256:" + base64.b64encode(hashlib.sha256(public).digest()).decode(),
+                "diagnostic_sql": f"DESCRIBE USER {user};",
                 "sql": "\n".join(statements)}
 
     def record_test(self, connection_id, version, error_code=None):

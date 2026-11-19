@@ -56,6 +56,19 @@ grant changes rather than rerunning CREATE statements. Removing a local profile
 does not revoke Snowflake access; an administrator must revoke/drop the dedicated
 identity and role separately when retiring it.
 
+The setup panel keeps test progress and the result visible beside the test
+button, even when its SQL area is scrolled. A key-pair login rejection requires
+checking the service identity: run the displayed `DESCRIBE USER` command as an
+administrator and compare `RSA_PUBLIC_KEY_FP` (or `RSA_PUBLIC_KEY_2_FP`) with the
+app's public fingerprint. Also check `LOGIN_NAME`, account identifier, and the
+local clock. Never assume a generic JWT rejection proves a key mismatch.
+
+If the user is missing but the new reader role already exists from a partial
+setup, run the original generated CREATE USER statement (with its original public
+key) and the remaining GRANT statements. Skip CREATE ROLE for the role you
+already created. If the user already exists, stop and inspect its ownership and
+registered fingerprint rather than replacing its key blindly.
+
 If testing fails, confirm account identifier and exact names, all SQL statements
 succeeded, warehouse availability, approved columns, and applicable Snowflake
 network/authentication policies. Do not paste private keys or passwords into chat.

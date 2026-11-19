@@ -167,9 +167,18 @@ class SnowflakeConnector:
                                metadata={"sql_sha256": hashlib.sha256(sql.encode()).hexdigest()})
         except ConnectorError:
             raise
-        except Exception:
+        except Exception as error:
             # Driver errors can include SQL, bindings, or private account details.
-            raise ConnectorError("PLATFORM_REQUEST_FAILED", statement_id) from None
+            code = "PLATFORM_REQUEST_FAILED"
+            from snowflake.connector.errors import Error as SnowflakeError
+            if isinstance(error, SnowflakeError):
+                if error.errno in {390144, 394300, 394301, 394302, 394303, 394304, 394305, 394306, 394307}:
+                    code = "SNOWFLAKE_KEY_AUTHENTICATION_FAILED"
+                elif error.sqlstate == "28000":
+                    code = "SNOWFLAKE_AUTHENTICATION_FAILED"
+                elif error.errno in {2003, 3001}:
+                    code = "SNOWFLAKE_OBJECT_ACCESS_FAILED"
+            raise ConnectorError(code, statement_id) from None
         finally:
             if connection and statement_id and not terminal:
                 try:

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, FormEvent } from "react";
 type ObjectConfig = { name: string; catalog: string; schema_name: string; table_name: string; preview_columns: string[]; object_kind?: "TABLE" | "VIEW" };
-type Setup = { connection_id: string; version: number; public_key: string; fingerprint: string; sql: string };
+type Setup = { connection_id: string; version: number; public_key: string; fingerprint: string; sql: string; diagnostic_sql: string };
 type Platform = "databricks" | "snowflake";
 type Profile = { id: string; name: string; platform?: Platform; workspace_url?: string; warehouse_id?: string; client_id?: string; account?: string; warehouse?: string; username?: string; role?: string; objects: ObjectConfig[]; status: string; checked_at: string | null; error_code: string | null };
 type Result = { platform: string; columns: { name: string; type_name: string }[]; rows: (string | null)[][]; statement_id: string };
@@ -9,6 +9,12 @@ type FormObject = Omit<ObjectConfig, "preview_columns"> & { columns: string };
 type Form = { platform: Platform; name: string; workspace_url: string; warehouse_id: string; client_id: string; client_secret: string; account: string; warehouse: string; username: string; role: string; objects: FormObject[] };
 const emptyObject = (): FormObject => ({ name: "", catalog: "", schema_name: "", table_name: "", columns: "" });
 const emptyForm = (): Form => ({ platform: "databricks", name: "", workspace_url: "", warehouse_id: "", client_id: "", client_secret: "", account: "", warehouse: "", username: "", role: "", objects: [emptyObject()] });
+function testFailure(profile: Profile): string {
+  if (profile.error_code === "SNOWFLAKE_KEY_AUTHENTICATION_FAILED") return "Snowflake rejected the key-pair login. Check that the service user exists in this account and that RSA_PUBLIC_KEY_FP or RSA_PUBLIC_KEY_2_FP matches the public key fingerprint shown in this setup. Also check the account identifier, LOGIN_NAME, and your computer’s clock. Keep this connection’s saved key.";
+  if (profile.error_code === "SNOWFLAKE_AUTHENTICATION_FAILED") return "Snowflake rejected the login. Check the service user, account identifier, role assignment, and account authentication policies.";
+  if (profile.error_code === "SNOWFLAKE_OBJECT_ACCESS_FAILED" || profile.error_code === "OBJECT_NOT_VISIBLE") return "The configured object is missing or unavailable to the service role. Check exact database/schema/table names and the generated USAGE and SELECT grants.";
+  return `Connection test failed (${profile.error_code || "unknown error"}). Check the identity, permissions, account details, and network access.`;
+}
 async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const response = await fetch(`/api/connector/v1/${path}`, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
   const data = await response.json();
@@ -75,8 +81,9 @@ export default function Connections() {
     try {
       const checked = await api<Profile>(`connections/${profile.id}/test`, "POST");
       setProfiles(previous => previous.map(p => p.id === checked.id ? checked : p));
+      setSetup(previous => previous?.profile.id === checked.id ? { ...previous, profile: checked } : previous);
       if (checked.status === "verified") { setSetup(null); setMessage(`${checked.name}: warehouse and approved object access verified.`); }
-      else setError(`${checked.name}: ${checked.error_code?.replaceAll("_", " ").toLowerCase()}. Check the identity, permissions, workspace URL, and network access.`);
+      else setError(testFailure(checked));
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(""); }
   }
@@ -185,13 +192,15 @@ export default function Connections() {
       else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
     }}><div className="dialog-head"><div><span className="eyebrow">SNOWFLAKE · ADMINISTRATOR SETUP</span><h2 id="setup-title">Authorize your connection</h2><p>{setup.profile.name}</p></div><button autoFocus aria-label="Close setup" disabled={!!busy} onClick={() => setSetup(null)}><Icon name="x"/></button></div>
     <div className="dialog-body">
-      {error && <div className="notice error" role="alert">{error}</div>}
       <p>Your data is already loaded. Run the SQL below once in a Snowflake SQL worksheet as an administrator with permission to create users, roles, and grant access. For your personal trial, use ACCOUNTADMIN.</p>
       <p>This creates a new service user and reader role. Use fresh names; stop if either already exists. The SQL grants SELECT on the listed objects and usage on their parents and warehouse. It does not reload data. After editing an existing connection, ask your administrator to apply only the necessary grant changes.</p>
       <label>Setup SQL<textarea className="setup-sql" readOnly spellCheck={false} value={setup.details.sql}/></label>
       <button className="secondary" onClick={async () => { try { await navigator.clipboard.writeText(setup.details.sql); setCopied(true); } catch { setError("Select and copy the SQL from the text box."); } }}>{copied ? "Copied" : "Copy SQL"}</button>
       <p><strong>Public key fingerprint</strong><br/><code>{setup.details.fingerprint}</code></p>
+      <label>Check the registered service identity<textarea readOnly rows={2} value={setup.details.diagnostic_sql}/><small>Run this read-only command in Snowflake as your administrator. Compare RSA_PUBLIC_KEY_FP (or RSA_PUBLIC_KEY_2_FP) with the fingerprint above, and check LOGIN_NAME against the configured service user. Do not replace a key until you confirm this dedicated identity belongs to this connection.</small></label>
       <div className="permission-note"><Icon name="shield"/><p>Only the public key appears here. The private key stays encrypted for your Windows user on this computer. Reopening this step keeps the same key. Warehouse queries may use Snowflake credits.</p></div>
+    </div><div className="setup-test-feedback" aria-busy={!!busy}>
+      {busy ? <p role="status">Testing your Snowflake login, warehouse, and approved objects. Please wait…</p> : error ? <div className="notice error" role="alert"><strong>Connection test needs attention.</strong> {error}</div> : <p>After all setup statements succeed, test access here.</p>}
     </div><div className="dialog-actions"><button className="secondary" disabled={!!busy} onClick={() => setSetup(null)}>Finish later</button><button className="primary" disabled={!!busy} onClick={() => test(setup.profile)}>{busy ? "Testing…" : "I ran the SQL · Test connection"}</button></div></div></div>}
     {deleting && <div className="overlay"><div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">Remove {deleting.name}?</h2><p>This removes the saved profile and encrypted secret from this computer. Your source data stays in place.</p><div className="dialog-actions"><button className="secondary" onClick={() => setDeleting(null)}>Keep connection</button><button className="danger" disabled={!!busy} onClick={remove}>Remove connection</button></div></div></div>}
   </div>;

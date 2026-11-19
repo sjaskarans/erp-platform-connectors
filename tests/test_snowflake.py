@@ -149,6 +149,24 @@ class SnowflakeTests(unittest.TestCase):
         self.assertNotIn("secret-key-value", str(caught.exception))
         self.assertTrue(conn.closed and conn.primary.closed)
 
+    def test_driver_errors_have_safe_actionable_categories(self):
+        from snowflake.connector.errors import DatabaseError
+        for number, state, expected in (
+            (390144, "28000", "SNOWFLAKE_KEY_AUTHENTICATION_FAILED"),
+            (394304, "28000", "SNOWFLAKE_KEY_AUTHENTICATION_FAILED"),
+            (999999, "28000", "SNOWFLAKE_AUTHENTICATION_FAILED"),
+            (2003, "42S02", "SNOWFLAKE_OBJECT_ACCESS_FAILED"),
+            (999999, "XXXXX", "PLATFORM_REQUEST_FAILED"),
+        ):
+            with self.subTest(number=number):
+                error = DatabaseError(msg="private-sql-and-key-material", errno=number, sqlstate=state)
+                conn = Connection(Cursor(error=error))
+                with self.assertRaises(ConnectorError) as caught:
+                    connector(conn).check_connection()
+                self.assertEqual(caught.exception.code, expected)
+                self.assertNotIn("private-sql-and-key-material", str(caught.exception))
+                self.assertTrue(conn.closed and conn.primary.closed)
+
     def test_audit_never_contains_bindings_results_or_sql(self):
         stream, logger = io.StringIO(), logging.getLogger("erp_connectors.snowflake")
         handler, previous = logging.StreamHandler(stream), logger.level
