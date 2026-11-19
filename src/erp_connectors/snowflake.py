@@ -142,16 +142,20 @@ class SnowflakeConnector:
                 remaining = max(0, self.timeout_seconds - (self.clock() - started))
                 self.sleep(min(self.poll_seconds, remaining))
             cursor.get_results_from_sfqid(statement_id)
-            columns = [{"name": column.name,
-                        "type_name": FIELD_ID_TO_NAME.get(column.type_code, str(column.type_code)),
-                        "precision": column.precision, "scale": column.scale,
-                        "nullable": column.is_nullable}
-                       for column in cursor.description or []]
+            columns = None
             rows, byte_count = [], 0
             while True:
                 if self.clock() - started >= self.timeout_seconds:
                     raise ConnectorError("TIMEOUT", statement_id)
                 batch = cursor.fetchmany(min(256, self.max_rows + 1 - len(rows)))
+                # The driver attaches asynchronous results lazily: description
+                # may stay None until the first fetch, including empty results.
+                if columns is None:
+                    columns = [{"name": column.name,
+                                "type_name": FIELD_ID_TO_NAME.get(column.type_code, str(column.type_code)),
+                                "precision": column.precision, "scale": column.scale,
+                                "nullable": column.is_nullable}
+                               for column in cursor.description or []]
                 if not batch:
                     break
                 serialized = [[cell(value) for value in row] for row in batch]

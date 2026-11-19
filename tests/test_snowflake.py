@@ -72,6 +72,26 @@ def connector(connection, **kwargs):
 
 
 class SnowflakeTests(unittest.TestCase):
+    def test_async_metadata_can_be_initialized_by_first_fetch(self):
+        class LazyCursor(Cursor):
+            def __init__(self, rows):
+                super().__init__(rows)
+                self.pending_description = self.description
+                self.description = None
+
+            def fetchmany(self, count):
+                self.description = self.pending_description
+                return super().fetchmany(count)
+
+        for rows in ([(Decimal("12.340000"),)], []):
+            with self.subTest(empty=not rows):
+                conn = Connection(LazyCursor(rows))
+                result = connector(conn).check_connection()
+                self.assertEqual(result.columns[0]["name"], "AMOUNT")
+                self.assertEqual(result.columns[0]["scale"], 6)
+                self.assertEqual(result.rows, [["12.340000"]] if rows else [])
+                self.assertTrue(conn.closed and conn.primary.closed)
+
     def test_exact_decimal_and_query_reference(self):
         conn = Connection()
         result = connector(conn).execute("total", {"company": "1000"})
