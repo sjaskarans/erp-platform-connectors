@@ -4,13 +4,14 @@ import os
 import secrets
 
 import requests
+from . import __version__
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from .service import QueryInput
-from .connections import ConnectionPayload, connection_request_body
+from .connections import BrowseInput, ObjectSelectionInput, ConnectionPayload, connection_request_body
 
 
 def create_app():
@@ -24,7 +25,7 @@ def create_app():
         if not credentials or not secrets.compare_digest(credentials.credentials, token):
             raise HTTPException(401, "Invalid API token", headers={"WWW-Authenticate": "Bearer"})
 
-    app = FastAPI(title="ERP integration test API", dependencies=[Depends(authorized)])
+    app = FastAPI(title="ERP connector reference gateway", version=__version__, dependencies=[Depends(authorized)])
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, error):
@@ -96,6 +97,16 @@ def create_app():
     def connection_setup(connection_id: str):
         from urllib.parse import quote
         return forward("GET", f"/v1/connections/{quote(connection_id, safe='')}/setup")
+
+    @app.post("/v1/connections/{connection_id}/browse")
+    def browse_connection(connection_id: str, body: BrowseInput):
+        from urllib.parse import quote
+        return forward("POST", f"/v1/connections/{quote(connection_id, safe='')}/browse", body.model_dump())
+
+    @app.post("/v1/connections/{connection_id}/selection")
+    def select_connection_objects(connection_id: str, body: ObjectSelectionInput):
+        from urllib.parse import quote
+        return forward("POST", f"/v1/connections/{quote(connection_id, safe='')}/selection", body.model_dump())
 
     @app.get("/v1/connections/{connection_id}/objects/{object_id}/preview")
     def connection_preview(connection_id: str, object_id: str, limit: int = Query(5, ge=1, le=100)):

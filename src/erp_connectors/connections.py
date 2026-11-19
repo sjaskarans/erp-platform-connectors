@@ -22,9 +22,9 @@ from .models import DataObject
 class ObjectInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
-    catalog: str = Field(min_length=1, max_length=128)
-    schema_name: str = Field(min_length=1, max_length=128)
-    table_name: str = Field(min_length=1, max_length=128)
+    catalog: str = Field(min_length=1, max_length=255)
+    schema_name: str = Field(min_length=1, max_length=255)
+    table_name: str = Field(min_length=1, max_length=255)
     preview_columns: list[str] = Field(default_factory=list, max_length=30)
     object_kind: Literal["TABLE", "VIEW"] = "TABLE"
 
@@ -38,7 +38,7 @@ class ObjectInput(BaseModel):
     @field_validator("preview_columns")
     @classmethod
     def columns(cls, values):
-        if any(not v.strip() or len(v) > 128 or any(ord(c) < 32 for c in v) for v in values):
+        if any(not v.strip() or len(v) > 255 or any(ord(c) < 32 for c in v) for v in values):
             raise ValueError("Invalid column name")
         return list(dict.fromkeys(v.strip() for v in values))
 
@@ -84,6 +84,30 @@ class ConnectionInput(BaseModel):
         return objects
 
 
+class SnowflakeAccessScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    catalog: str = Field(min_length=1, max_length=255)
+    schema_name: str = Field(min_length=1, max_length=255)
+    _names = field_validator("catalog", "schema_name")(ObjectInput.identifier.__func__)
+
+
+class ObjectSelectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    version: int = Field(ge=1)
+    objects: list[ObjectInput] = Field(max_length=30)
+    _objects = field_validator("objects")(ConnectionInput.unique_objects.__func__)
+
+
+class BrowseInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    level: Literal["databases", "schemas", "objects", "columns"]
+    database: str = Field(default="", max_length=255)
+    schema_name: str = Field(default="", max_length=255)
+    table: str = Field(default="", max_length=255)
+    after: str = Field(default="", max_length=255)
+    prefix: str = Field(default="", max_length=255)
+
+
 class SnowflakeConnectionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     platform: Literal["snowflake"]
@@ -94,7 +118,8 @@ class SnowflakeConnectionInput(BaseModel):
     role: str = Field(min_length=1, max_length=255)
     private_key_pem: SecretStr | None = Field(default=None, max_length=16000)
     private_key_passphrase: SecretStr | None = Field(default=None, max_length=4096)
-    objects: list[ObjectInput] = Field(min_length=1, max_length=30)
+    objects: list[ObjectInput] = Field(default_factory=list, max_length=30)
+    access_scope: SnowflakeAccessScope | None = None
 
     _name = field_validator("name")(ConnectionInput.display_name.__func__)
     _objects = field_validator("objects")(ConnectionInput.unique_objects.__func__)
@@ -260,6 +285,22 @@ class ConnectionStore:
         config = json.loads(row["config"])
         return config, self.vault.reveal(row["secret"]), row["version"]
 
+    def select_objects(self, connection_id, value: ObjectSelectionInput):
+        """Versioned selection update that cannot replace identity or credentials."""
+        with self.lock:
+            row = self._row(connection_id)
+            config = json.loads(row["config"])
+            if config.get("platform") != "snowflake":
+                raise ValueError("Discovery selection is available for Snowflake only")
+            config["objects"] = [obj.model_dump() for obj in value.objects]
+            with self._database() as db:
+                changed = db.execute("""UPDATE connections SET config=?, version=version+1,
+                    status='saved', checked_at=NULL, error_code=NULL WHERE id=? AND version=?""",
+                    (json.dumps(config), connection_id, value.version)).rowcount
+            if not changed:
+                raise ValueError("Connection changed; reload before saving your selection")
+            return self.public(self._row(connection_id))
+
     def snowflake_setup(self, connection_id):
         """Only public key material leaves the service. Reading setup never rotates keys."""
         import base64
@@ -290,6 +331,18 @@ class ConnectionStore:
             f"GRANT USAGE ON WAREHOUSE {ident(config['warehouse'])} TO ROLE {role};",
         ]
         grants = []
+        scope = config.get("access_scope")
+        if scope:
+            database = ident(scope["catalog"])
+            schema = database + "." + ident(scope["schema_name"])
+            grants.extend([
+                "-- Administrator-approved schema scope: all CURRENT tables and views.",
+                "-- No future grants. Selecting objects in the app does not narrow Snowflake privileges.",
+                f"GRANT USAGE ON DATABASE {database} TO ROLE {role};",
+                f"GRANT USAGE ON SCHEMA {schema} TO ROLE {role};",
+                f"GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO ROLE {role};",
+                f"GRANT SELECT ON ALL VIEWS IN SCHEMA {schema} TO ROLE {role};",
+            ])
         for obj in config["objects"]:
             database = ident(obj["catalog"])
             schema = database + "." + ident(obj["schema_name"])
@@ -304,11 +357,11 @@ class ConnectionStore:
                 "diagnostic_sql": f"DESCRIBE USER {user};",
                 "sql": "\n".join(statements)}
 
-    def record_test(self, connection_id, version, error_code=None):
+    def record_test(self, connection_id, version, error_code=None, has_objects=True):
         with self._database() as db:
             changed = db.execute("""UPDATE connections SET status=?, checked_at=?, error_code=?
                 WHERE id=? AND version=?""", (
-                    "failed" if error_code else "verified", datetime.now(timezone.utc).isoformat(),
+                    "failed" if error_code else "verified" if has_objects else "connected", datetime.now(timezone.utc).isoformat(),
                     error_code, connection_id, version)).rowcount
         if not changed:
             raise ValueError("Connection changed during its test; run the test again")
@@ -332,6 +385,7 @@ def runtime_connector(config, secret):
             account=config["account"], user=config["username"], warehouse=config["warehouse"],
             role=config["role"], authenticator="SNOWFLAKE_JWT", private_key=key, paramstyle="qmark",
             login_timeout=15, network_timeout=15, socket_timeout=15, client_session_keep_alive=False,
+            enable_server_session_keep_alive_auto_detection=False,
             session_parameters={"STATEMENT_TIMEOUT_IN_SECONDS": 120, "QUERY_TAG": "erp-platform-connectors",
                                 "CLIENT_TELEMETRY_ENABLED": False},
         ), objects)

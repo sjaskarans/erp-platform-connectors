@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
 type Context = { params: Promise<{ path: string[] }> };
-const allowed = /^v1\/(connections(?:\/[a-f0-9-]+(?:\/(?:test|setup)|\/objects\/[a-zA-Z0-9_-]+\/preview)?)?|objects(?:\/[a-zA-Z0-9_-]+\/(?:schema|preview))?|queries\/[a-zA-Z0-9_-]+)$/;
+const allowed = /^v1\/(connections(?:\/[a-f0-9-]+(?:\/(?:test|setup|browse|selection)|\/objects\/[a-zA-Z0-9_-]+\/preview)?)?|objects(?:\/[a-zA-Z0-9_-]+\/(?:schema|preview))?|queries\/[a-zA-Z0-9_-]+)$/;
 
 async function proxy(request: NextRequest, context: Context) {
   const hostname = request.nextUrl.hostname;

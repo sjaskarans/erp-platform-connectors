@@ -1,25 +1,21 @@
 "use client";
 import { useEffect, useRef, useState, FormEvent } from "react";
+import { api } from "./connector-api";
+import DataBrowser from "./data-browser";
 type ObjectConfig = { name: string; catalog: string; schema_name: string; table_name: string; preview_columns: string[]; object_kind?: "TABLE" | "VIEW" };
 type Setup = { connection_id: string; version: number; public_key: string; fingerprint: string; sql: string; diagnostic_sql: string };
 type Platform = "databricks" | "snowflake";
-type Profile = { id: string; name: string; platform?: Platform; workspace_url?: string; warehouse_id?: string; client_id?: string; account?: string; warehouse?: string; username?: string; role?: string; objects: ObjectConfig[]; status: string; checked_at: string | null; error_code: string | null };
+type Profile = { id: string; version: number; access_scope?: { catalog: string; schema_name: string } | null; name: string; platform?: Platform; workspace_url?: string; warehouse_id?: string; client_id?: string; account?: string; warehouse?: string; username?: string; role?: string; objects: ObjectConfig[]; status: string; checked_at: string | null; error_code: string | null };
 type Result = { platform: string; columns: { name: string; type_name: string }[]; rows: (string | null)[][]; statement_id: string };
 type FormObject = Omit<ObjectConfig, "preview_columns"> & { columns: string };
-type Form = { platform: Platform; name: string; workspace_url: string; warehouse_id: string; client_id: string; client_secret: string; account: string; warehouse: string; username: string; role: string; objects: FormObject[] };
+type Form = { platform: Platform; name: string; workspace_url: string; warehouse_id: string; client_id: string; client_secret: string; account: string; warehouse: string; username: string; role: string; scope_catalog: string; scope_schema: string; objects: FormObject[] };
 const emptyObject = (): FormObject => ({ name: "", catalog: "", schema_name: "", table_name: "", columns: "" });
-const emptyForm = (): Form => ({ platform: "databricks", name: "", workspace_url: "", warehouse_id: "", client_id: "", client_secret: "", account: "", warehouse: "", username: "", role: "", objects: [emptyObject()] });
+const emptyForm = (): Form => ({ platform: "databricks", name: "", workspace_url: "", warehouse_id: "", client_id: "", client_secret: "", account: "", warehouse: "", username: "", role: "", scope_catalog: "", scope_schema: "", objects: [emptyObject()] });
 function testFailure(profile: Profile): string {
   if (profile.error_code === "SNOWFLAKE_KEY_AUTHENTICATION_FAILED") return "Snowflake rejected the key-pair login. Check that the service user exists in this account and that RSA_PUBLIC_KEY_FP or RSA_PUBLIC_KEY_2_FP matches the public key fingerprint shown in this setup. Also check the account identifier, LOGIN_NAME, and your computer’s clock. Keep this connection’s saved key.";
   if (profile.error_code === "SNOWFLAKE_AUTHENTICATION_FAILED") return "Snowflake rejected the login. Check the service user, account identifier, role assignment, and account authentication policies.";
   if (profile.error_code === "SNOWFLAKE_OBJECT_ACCESS_FAILED" || profile.error_code === "OBJECT_NOT_VISIBLE") return "The configured object is missing or unavailable to the service role. Check exact database/schema/table names and the generated USAGE and SELECT grants.";
   return `Connection test failed (${profile.error_code || "unknown error"}). Check the identity, permissions, account details, and network access.`;
-}
-async function api<T>(path: string, method = "GET", body?: unknown): Promise<T> {
-  const response = await fetch(`/api/connector/v1/${path}`, { method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body), cache: "no-store" });
-  const data = await response.json();
-  if (!response.ok) throw new Error(typeof data.detail === "string" ? data.detail : "The request could not be completed. Check your configuration.");
-  return data;
 }
 function Icon({ name, size = 20 }: { name: string; size?: number }) {
   const paths: Record<string, React.ReactNode> = {
@@ -41,6 +37,10 @@ export default function Connections() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [setup, setSetup] = useState<{ profile: Profile; details: Setup } | null>(null);
+  const [browsing, setBrowsing] = useState<Profile | null>(null);
+  const [useSchemaScope, setUseSchemaScope] = useState(true);
+  const [previewProfile, setPreviewProfile] = useState<Profile | null>(null);
+  const [liveObject, setLiveObject] = useState("");
   const [copied, setCopied] = useState(false);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -66,8 +66,8 @@ export default function Connections() {
     return () => document.removeEventListener("keydown", onEscape);
   }, [modal, busy]);
   function open(profile?: Profile) {
-    setError(""); setMessage(""); setEditing(profile?.id || null);
-    setForm(profile ? { ...emptyForm(), platform: profile.platform || "databricks", name: profile.name, workspace_url: profile.workspace_url || "", warehouse_id: profile.warehouse_id || "", client_id: profile.client_id || "", account: profile.account || "", warehouse: profile.warehouse || "", username: profile.username || "", role: profile.role || "", objects: profile.objects.map(o => ({ ...o, columns: o.preview_columns.join(", ") })) } : emptyForm());
+    setError(""); setMessage(""); setEditing(profile?.id || null); setUseSchemaScope(profile ? !!profile.access_scope : true);
+    setForm(profile ? { ...emptyForm(), platform: profile.platform || "databricks", name: profile.name, workspace_url: profile.workspace_url || "", warehouse_id: profile.warehouse_id || "", client_id: profile.client_id || "", account: profile.account || "", warehouse: profile.warehouse || "", username: profile.username || "", role: profile.role || "", scope_catalog: profile.access_scope?.catalog || "", scope_schema: profile.access_scope?.schema_name || "", objects: profile.objects.map(o => ({ ...o, columns: o.preview_columns.join(", ") })) } : emptyForm());
     setModal(true);
   }
   async function showSetup(profile: Profile) {
@@ -82,7 +82,7 @@ export default function Connections() {
       const checked = await api<Profile>(`connections/${profile.id}/test`, "POST");
       setProfiles(previous => previous.map(p => p.id === checked.id ? checked : p));
       setSetup(previous => previous?.profile.id === checked.id ? { ...previous, profile: checked } : previous);
-      if (checked.status === "verified") { setSetup(null); setMessage(`${checked.name}: warehouse and approved object access verified.`); }
+      if (checked.status === "verified" || checked.status === "connected") { setSetup(null); setMessage(checked.status === "connected" ? `${checked.name}: login verified. Browse and select your data next.` : `${checked.name}: warehouse and approved object access verified.`); if (checked.status === "connected") setBrowsing(checked); }
       else setError(testFailure(checked));
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(""); }
@@ -90,8 +90,8 @@ export default function Connections() {
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy("save"); setError("");
     const intent = ((event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null)?.value;
-    const shared = { platform: form.platform, name: form.name, objects: form.objects.map(({ columns, ...o }) => ({ ...o, preview_columns: columns.split(",").map(v => v.trim()).filter(Boolean) })) };
-    const body = form.platform === "snowflake" ? { ...shared, account: form.account, warehouse: form.warehouse, username: form.username, role: form.role } : { ...shared, workspace_url: form.workspace_url, warehouse_id: form.warehouse_id, client_id: form.client_id, client_secret: form.client_secret || undefined };
+    const shared = { platform: form.platform, name: form.name, objects: form.platform === "snowflake" && useSchemaScope && !editing ? [] : form.objects.map(({ columns, ...o }) => ({ ...o, preview_columns: columns.split(",").map(v => v.trim()).filter(Boolean) })) };
+    const body = form.platform === "snowflake" ? { ...shared, account: form.account, warehouse: form.warehouse, username: form.username, role: form.role, access_scope: useSchemaScope ? { catalog: form.scope_catalog, schema_name: form.scope_schema } : null } : { ...shared, workspace_url: form.workspace_url, warehouse_id: form.warehouse_id, client_id: form.client_id, client_secret: form.client_secret || undefined };
     try {
       const profile = await api<Profile>(editing ? `connections/${editing}` : "connections", editing ? "PUT" : "POST", body);
       setForm(emptyForm()); setModal(false); await refresh();
@@ -102,18 +102,19 @@ export default function Connections() {
     finally { setBusy(""); }
   }
   async function explore() {
-    setExploring(true); setBusy("sample"); setError("");
+    setExploring(true); setPreviewProfile(null); setBusy("sample"); setError("");
     try {
       setSampleObjects((await api<{ objects: string[] }>("objects")).objects);
       setResult(await api<Result>(`objects/${sample}/preview?limit=5`));
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(""); }
   }
-  async function preview(profile: Profile) {
+  async function preview(profile: Profile, objectName?: string) {
     setBusy(profile.id); setError("");
     try {
-      const object = profile.objects.find(o => o.preview_columns.length);
+      const object = profile.objects.find(o => o.preview_columns.length && (!objectName || o.name === objectName));
       if (!object) throw new Error("Add approved preview columns in Edit connection first.");
+      setPreviewProfile(profile); setLiveObject(object.name);
       setResult(await api<Result>(`connections/${profile.id}/objects/${encodeURIComponent(object.name)}/preview?limit=5`));
       setExploring(true);
     } catch (e) { setError((e as Error).message); }
@@ -145,8 +146,8 @@ export default function Connections() {
         {message && <div className="notice success" role="status">{message}<button aria-label="Dismiss message" onClick={() => setMessage("")}><Icon name="x" size={16}/></button></div>}
         <section className="demo-card"><div className="demo-art"><Icon name="database" size={32}/><span className="art-dot one"/><span className="art-dot two"/></div><div className="demo-copy"><span className="tag">NO CLOUD ACCOUNT NEEDED</span><h2>Take a look around with sample data</h2><p>Explore 9 fictional ERP tables across finance, inventory, and orders.<br/>A working local demo, ready when you are.</p></div><button className="secondary" onClick={explore} disabled={!!busy}>{busy === "sample" ? "Loading…" : "Explore sample data"}<Icon name="arrow" size={17}/></button></section>
         <div className="section-heading"><h2>Your connections <span>{profiles.length}</span></h2><span>Databricks & Snowflake</span></div>
-        {loading ? <div className="empty-state">Loading connections…</div> : profiles.length === 0 ? <section className="empty-state"><div className="empty-icon"><Icon name="plug" size={27}/></div><h3>A home for your first connection</h3><p>Add your workspace and service identity.<br/>We’ll check access before you start exploring.</p><button className="text-button" onClick={() => open()}>Connect a platform <Icon name="arrow" size={17}/></button></section> : <div className="connection-grid">{profiles.map(profile => <article className="connection-card" key={profile.id}><div className="connection-top"><div className="db-logo"><Icon name="layers" size={25}/></div><span className={`status ${profile.status}`}>{profile.status === "verified" ? "Verified" : profile.status === "failed" ? "Needs attention" : "Saved · not tested"}</span></div><h3>{profile.name}</h3><span className="platform-label">{profile.platform === "snowflake" ? "Snowflake · Key-pair authentication" : "Databricks · Google Cloud"}</span><p className="host">{profile.platform === "snowflake" ? `${profile.account} · ${profile.warehouse}` : profile.workspace_url?.replace("https://", "")}</p><div className="connection-meta"><span>{profile.objects.length} approved object{profile.objects.length !== 1 ? "s" : ""}</span><span>Read-only setup</span></div>{profile.checked_at && <small className="tested-at">Last checked {new Date(profile.checked_at).toLocaleString()}</small>}<div className="card-actions"><button className="secondary small" disabled={!!busy} onClick={() => test(profile)}>{busy === profile.id ? "Working…" : "Test connection"}</button>{profile.platform === "snowflake" && <button className="text-button" onClick={() => showSetup(profile)} disabled={!!busy}>Setup SQL</button>}<button className="text-button" onClick={() => open(profile)} disabled={!!busy}>Edit</button><button className="text-button" onClick={() => preview(profile)} disabled={!!busy}>Preview</button><button className="delete-button" aria-label={`Remove ${profile.name}`} onClick={() => setDeleting(profile)} disabled={!!busy}><Icon name="x" size={16}/></button></div></article>)}</div>}
-        {exploring && <section className="results-panel"><div className="section-heading"><div><h2>Data preview</h2><p>{!result ? "Loading preview…" : result.platform === "local-duckdb-demo" ? "Synthetic data · local database · first 5 rows" : "Live source · approved columns · first 5 rows"}</p></div><button className="text-button" onClick={() => { setExploring(false); setResult(null); }}>Close <Icon name="x" size={16}/></button></div>{result?.platform === "local-duckdb-demo" && <div className="sample-controls"><label htmlFor="sample-object">Sample object</label><select id="sample-object" value={sample} onChange={e => setSample(e.target.value)}>{sampleObjects.map(name => <option key={name}>{name}</option>)}</select><button className="secondary small" onClick={explore} disabled={!!busy}>Load preview</button></div>}<div className="table-wrap">{result && <table><thead><tr>{result.columns.map((c, i) => <th key={i}>{c.name}<small>{c.type_name}</small></th>)}</tr></thead><tbody>{result.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === null ? <span className="null">null</span> : cell}</td>)}</tr>)}</tbody></table>}</div>{result?.rows.length === 0 && <p>No rows returned.</p>}</section>}
+        {loading ? <div className="empty-state">Loading connections…</div> : profiles.length === 0 ? <section className="empty-state"><div className="empty-icon"><Icon name="plug" size={27}/></div><h3>A home for your first connection</h3><p>Add your workspace and service identity.<br/>We’ll check access before you start exploring.</p><button className="text-button" onClick={() => open()}>Connect a platform <Icon name="arrow" size={17}/></button></section> : <div className="connection-grid">{profiles.map(profile => <article className="connection-card" key={profile.id}><div className="connection-top"><div className="db-logo"><Icon name="layers" size={25}/></div><span className={`status ${profile.status}`}>{profile.status === "verified" ? "Verified" : profile.status === "failed" ? "Needs attention" : profile.status === "connected" ? "Connected · choose data" : "Saved · not tested"}</span></div><h3>{profile.name}</h3><span className="platform-label">{profile.platform === "snowflake" ? "Snowflake · Key-pair authentication" : "Databricks · Google Cloud"}</span><p className="host">{profile.platform === "snowflake" ? `${profile.account} · ${profile.warehouse}` : profile.workspace_url?.replace("https://", "")}</p><div className="connection-meta"><span>{profile.objects.length} approved object{profile.objects.length !== 1 ? "s" : ""}</span><span>Read-only setup</span></div>{profile.checked_at && <small className="tested-at">Last checked {new Date(profile.checked_at).toLocaleString()}</small>}<div className="card-actions"><button className="secondary small" disabled={!!busy} onClick={() => test(profile)}>{busy === profile.id ? "Working…" : "Test connection"}</button>{profile.platform === "snowflake" && <><button className="text-button" onClick={() => setBrowsing(profile)} disabled={!!busy}>Browse data</button><button className="text-button" onClick={() => showSetup(profile)} disabled={!!busy}>Setup SQL</button></>}<button className="text-button" onClick={() => open(profile)} disabled={!!busy}>Edit</button><button className="text-button" onClick={() => preview(profile)} disabled={!!busy}>Preview</button><button className="delete-button" aria-label={`Remove ${profile.name}`} onClick={() => setDeleting(profile)} disabled={!!busy}><Icon name="x" size={16}/></button></div></article>)}</div>}
+        {exploring && <section className="results-panel"><div className="section-heading"><div><h2>Data preview</h2><p>{!result ? "Loading preview…" : result.platform === "local-duckdb-demo" ? "Synthetic data · local database · first 5 rows" : "Live source · approved columns · first 5 rows"}</p></div><button className="text-button" onClick={() => { setExploring(false); setResult(null); }}>Close <Icon name="x" size={16}/></button></div>{result?.platform === "local-duckdb-demo" && <div className="sample-controls"><label htmlFor="sample-object">Sample object</label><select id="sample-object" value={sample} onChange={e => setSample(e.target.value)}>{sampleObjects.map(name => <option key={name}>{name}</option>)}</select><button className="secondary small" onClick={explore} disabled={!!busy}>Load preview</button></div>}{previewProfile && <div className="sample-controls"><label htmlFor="live-object">Approved object</label><select id="live-object" value={liveObject} disabled={!!busy} onChange={e => void preview(previewProfile, e.target.value)}>{previewProfile.objects.filter(o => o.preview_columns.length).map(o => <option key={o.name} value={o.name}>{o.catalog}.{o.schema_name}.{o.table_name}</option>)}</select></div>}<div className="table-wrap">{result && <table><thead><tr>{result.columns.map((c, i) => <th key={i}>{c.name}<small>{c.type_name}</small></th>)}</tr></thead><tbody>{result.rows.map((row, i) => <tr key={i}>{row.map((cell, j) => <td key={j}>{cell === null ? <span className="null">null</span> : cell}</td>)}</tr>)}</tbody></table>}</div>{result?.rows.length === 0 && <p>No rows returned.</p>}</section>}
         <section className="steps"><div><span>01</span><h3>Connect your platform</h3><p>Your workspace. Your credentials.<br/>A connection you control.</p></div><div><span>02</span><h3>Verify access</h3><p>Check the warehouse and approved<br/>objects with your service identity.</p></div><div><span>03</span><h3>Build shared understanding</h3><p>Use the connection as the foundation<br/>for your business semantics.</p></div></section>
         <footer><span><Icon name="shield" size={15}/>Secrets encrypted for your Windows user</span><span>Redshift and SAP connectors are next.</span></footer>
       </main>
@@ -177,10 +178,13 @@ export default function Connections() {
           <label>Service user name<input required value={form.username} onChange={e => field("username", e.target.value)} placeholder="SVC_ERP_CONNECTOR"/><small>Use a dedicated Snowflake user with TYPE = SERVICE.</small></label>
           <div className="permission-note"><Icon name="shield"/><p>The app generates a dedicated RSA key on the backend. Next, copy the setup SQL into Snowflake to register its public key and grant read access. Choose a new service user and role for this connection. Existing connections keep their saved key.</p></div>
         </>}
+        {form.platform === "snowflake" && <><label className="scope-choice"><input type="checkbox" checked={useSchemaScope} onChange={e => setUseSchemaScope(e.target.checked)}/>Discover data from an administrator-approved schema</label>{useSchemaScope && <><div className="form-grid"><label>Approved database<input required value={form.scope_catalog} onChange={e => field("scope_catalog", e.target.value)} placeholder="ERP_DEMO"/></label><label>Approved schema<input required value={form.scope_schema} onChange={e => field("scope_schema", e.target.value)} placeholder="ERP_CONNECTOR_DEMO_V1"/></label></div><div className="permission-note"><Icon name="shield"/><p>Your administrator reviews SQL granting this service role SELECT on <strong>all current tables and views in this schema</strong>. Future objects are excluded. After connection, choose tables and columns in Browse data. For narrower source permissions, turn this off and configure individual objects.</p></div></>}</>}
+        {(form.platform !== "snowflake" || !useSchemaScope) && <>
         <div className="form-section"><span>3</span><h3>Approved data objects</h3></div>
         <p className="form-hint">Choose the tables or views this connection may inspect. Data access is enforced by your source platform permissions.</p>
         {form.objects.map((object, i) => <fieldset key={i}><legend>Object {i + 1}</legend><div className="form-grid"><label>Object label<input required pattern="[a-zA-Z0-9_-]+" value={object.name} onChange={e => objectField(i, "name", e.target.value)} placeholder="finance_lines"/></label><label>{form.platform === "snowflake" ? "Database" : "Catalog"}<input required value={object.catalog} onChange={e => objectField(i, "catalog", e.target.value)} placeholder={form.platform === "snowflake" ? "ERP_DEMO" : "your_catalog"}/></label><label>Schema<input required value={object.schema_name} onChange={e => objectField(i, "schema_name", e.target.value)} placeholder={form.platform === "snowflake" ? "ERP_CONNECTOR_DEMO_V1" : "approved"}/></label><label>Table or view<input required value={object.table_name} onChange={e => objectField(i, "table_name", e.target.value)} placeholder="finance_lines"/></label></div>{form.platform === "snowflake" && <label>Object type<select value={object.object_kind || "TABLE"} onChange={e => objectField(i, "object_kind", e.target.value)}><option value="TABLE">Table</option><option value="VIEW">View</option></select></label>}<label>Preview columns <span className="optional">optional</span><input value={object.columns} onChange={e => objectField(i, "columns", e.target.value)} placeholder="company_code, amount, currency"/><small>Comma-separated. Leave empty to disable row previews.</small></label>{form.objects.length > 1 && <button className="text-button" type="button" onClick={() => setForm(previous => ({ ...previous, objects: previous.objects.filter((_, index) => index !== i) }))}>Remove object</button>}</fieldset>)}
         <button type="button" className="text-button" disabled={form.objects.length >= 30} onClick={() => setForm(previous => ({ ...previous, objects: [...previous.objects, emptyObject()] }))}><Icon name="plus" size={16}/>Add another object</button>
+        </>}
         <div className="permission-note"><Icon name="shield"/><p>{form.platform === "snowflake" ? <>Your service user’s role needs <strong>USAGE</strong> on the warehouse, database and schema, and <strong>SELECT</strong> on these objects. Enter names with their exact stored case, usually uppercase.</> : <>Your service principal needs <strong>CAN USE</strong> on the warehouse, parent usage privileges, and <strong>SELECT</strong> on these objects.</>} Saving a connection does not grant permissions.</p></div>
       </div><div className="dialog-actions">{form.platform === "databricks" && <button type="submit" value="save" className="secondary" disabled={!!busy}>Save for later</button>}<button type="submit" value="test" className="primary" disabled={!!busy}>{busy ? "Saving…" : form.platform === "snowflake" ? "Continue to setup SQL" : "Save & test connection"}<Icon name="arrow" size={17}/></button></div></form>
     </div></div>}
@@ -193,7 +197,7 @@ export default function Connections() {
     }}><div className="dialog-head"><div><span className="eyebrow">SNOWFLAKE · ADMINISTRATOR SETUP</span><h2 id="setup-title">Authorize your connection</h2><p>{setup.profile.name}</p></div><button autoFocus aria-label="Close setup" disabled={!!busy} onClick={() => setSetup(null)}><Icon name="x"/></button></div>
     <div className="dialog-body">
       <p>Your data is already loaded. Run the SQL below once in a Snowflake SQL worksheet as an administrator with permission to create users, roles, and grant access. For your personal trial, use ACCOUNTADMIN.</p>
-      <p>This creates a new service user and reader role. Use fresh names; stop if either already exists. The SQL grants SELECT on the listed objects and usage on their parents and warehouse. It does not reload data. After editing an existing connection, ask your administrator to apply only the necessary grant changes.</p>
+      <p>This creates a new service user and reader role. Use fresh names; stop if either already exists. The SQL grants the approved schema or listed objects, plus usage on their parents and warehouse. Schema scope includes all current tables/views; it does not grant future objects. It does not reload data. After editing an existing connection, ask your administrator to apply only the necessary grant changes.</p>
       <label>Setup SQL<textarea className="setup-sql" readOnly spellCheck={false} value={setup.details.sql}/></label>
       <button className="secondary" onClick={async () => { try { await navigator.clipboard.writeText(setup.details.sql); setCopied(true); } catch { setError("Select and copy the SQL from the text box."); } }}>{copied ? "Copied" : "Copy SQL"}</button>
       <p><strong>Public key fingerprint</strong><br/><code>{setup.details.fingerprint}</code></p>
@@ -202,6 +206,7 @@ export default function Connections() {
     </div><div className="setup-test-feedback" aria-busy={!!busy}>
       {busy ? <p role="status">Testing your Snowflake login, warehouse, and approved objects. Please wait…</p> : error ? <div className="notice error" role="alert"><strong>Connection test needs attention.</strong> {error}</div> : <p>After all setup statements succeed, test access here.</p>}
     </div><div className="dialog-actions"><button className="secondary" disabled={!!busy} onClick={() => setSetup(null)}>Finish later</button><button className="primary" disabled={!!busy} onClick={() => test(setup.profile)}>{busy ? "Testing…" : "I ran the SQL · Test connection"}</button></div></div></div>}
+    {browsing && <DataBrowser key={`${browsing.id}:${browsing.version}`} id={browsing.id} version={browsing.version} initial={browsing.objects} onClose={() => setBrowsing(null)} onSaved={async () => { setBrowsing(null); await refresh(); setMessage("Data selection saved. Test the connection to verify access, then choose Preview."); }}/>}
     {deleting && <div className="overlay"><div className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-title"><h2 id="delete-title">Remove {deleting.name}?</h2><p>This removes the saved profile and encrypted secret from this computer. Your source data stays in place.</p><div className="dialog-actions"><button className="secondary" onClick={() => setDeleting(null)}>Keep connection</button><button className="danger" disabled={!!busy} onClick={remove}>Remove connection</button></div></div></div>}
   </div>;
 }

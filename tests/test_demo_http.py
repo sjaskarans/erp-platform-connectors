@@ -168,6 +168,36 @@ class DemoHTTPTests(unittest.TestCase):
                                   headers=self.headers, timeout=5, proxies={"http": "", "https": ""})
         self.assertEqual(removed.status_code, 200)
 
+    def test_selection_route_is_versioned_and_rejects_identity_fields(self):
+        from erp_connectors.connections import connection_request_body
+        from test_snowflake_profiles import snowflake_profile
+        values = connection_request_body(snowflake_profile())
+        response = requests.post(self.url + '/v1/connections', headers=self.headers,
+                                 json=values, timeout=5, proxies={'http': '', 'https': ''})
+        self.assertEqual(response.status_code, 201, response.text)
+        connection_id = response.json()['id']
+        url = self.url + f'/v1/connections/{connection_id}/selection'
+        try:
+            selected = requests.post(url, headers=self.headers, json={'version': 1, 'objects': []},
+                                     timeout=5, proxies={'http': '', 'https': ''})
+            self.assertEqual(selected.status_code, 200, selected.text)
+            self.assertEqual(selected.json()['version'], 2)
+            stale = requests.post(url, headers=self.headers, json={'version': 1, 'objects': []},
+                                  timeout=5, proxies={'http': '', 'https': ''})
+            self.assertEqual(stale.status_code, 409)
+            invalid = requests.post(url, headers=self.headers,
+                json={'version': 2, 'objects': [], 'role': 'ACCOUNTADMIN'}, timeout=5,
+                proxies={'http': '', 'https': ''})
+            self.assertEqual(invalid.status_code, 422)
+            invalid_browse = requests.post(self.url + f'/v1/connections/{connection_id}/browse',
+                headers=self.headers, json={'level': 'raw-sql', 'sql': 'secret-do-not-echo'},
+                timeout=5, proxies={'http': '', 'https': ''})
+            self.assertEqual(invalid_browse.status_code, 422)
+            self.assertNotIn('secret-do-not-echo', invalid_browse.text)
+        finally:
+            requests.delete(self.url + f'/v1/connections/{connection_id}', headers=self.headers,
+                            timeout=5, proxies={'http': '', 'https': ''})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,7 +30,12 @@ the Python installation from README and `npm install` in `frontend` first.
 3. For Databricks, enter the service principal client ID and OAuth secret.
    For Snowflake, choose a **new** dedicated service username and reader role.
    The app generates the RSA private key on the backend and encrypts it with Windows DPAPI.
-4. Register approved objects: a short label, database/catalog, schema, and table
+4. For Snowflake, use **Discover data from an administrator-approved schema**:
+   enter the database/schema once. Its setup SQL explicitly grants SELECT on all
+   current tables/views in that schema, with no future grants. After login, use
+   **Browse data** to select objects and columns. Turn schema discovery off when
+   an administrator requires individual-object source grants.
+   For Databricks or the individual-object Snowflake option, register approved objects: a short label, database/catalog, schema, and table
    or view. Select the Snowflake object type. Enter exact stored names (usually
    uppercase for Snowflake), and explicit preview columns to enable row previews.
 5. For Snowflake, choose **Continue to setup SQL**, copy the generated SQL, and
@@ -89,3 +94,21 @@ that malformed secret fields cannot be echoed back in error responses.
 The CLI environment-variable path remains available for developer automation.
 The user-facing screen supplies configuration directly to a new connector
 instance for the selected profile, rather than changing global process settings.
+
+## Browse data reference flow
+
+On a Snowflake card, **Browse data** opens databases → schemas → tables/views →
+columns. Metadata is read under the connection's service role. Search uses an
+exact-case prefix and each page contains up to 100 items. Select listed objects
+or columns in a batch; the reference profile supports 30 objects and 30 preview
+columns each. Columns are selected explicitly, so checking a table alone enables
+metadata but does not enable row previews.
+
+Review the selection, save it, then test access. Saving validates source column
+names and uses the profile version to avoid overwriting newer configuration.
+The identity and key remain unchanged. Preview includes an approved-object
+selector for switching between selected tables. New tables are not selected
+automatically, and deselecting an object does not revoke Snowflake grants.
+
+The screen is a reference integration client, not a separate client-facing product.
+See [team integration](team-integration.md) for SDK and API usage.

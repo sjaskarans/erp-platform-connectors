@@ -8,6 +8,18 @@ Redshift and direct SAP connectors are subsequent, separate steps.
 The connector retrieves metadata and data. Metric definitions, join inference,
 semantic compilation, AI, dashboards, and ERP write-back are outside this package.
 
+## Team handoff
+
+Start with [the v0.2.0 integration guide](docs/team-integration.md) and
+[the OpenAPI contract](docs/openapi.json). The reusable Python SDK is the
+connector deliverable; the local Next.js screen and API processes demonstrate
+how the team's larger application can call it.
+
+Snowflake now supports paginated metadata discovery and versioned object/column
+selection. Clients can browse and choose accessible tables without typing each
+object name. An administrator still approves the source access boundary once.
+Databricks currently retains its approved-object configuration flow.
+
 ## First delivery
 
 - Explicit service-principal OAuth authentication through the official SDK.

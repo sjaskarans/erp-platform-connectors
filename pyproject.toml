@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "erp-platform-connectors"
-version = "0.1.0"
+version = "0.2.0"
 description = "Read-only connectors for the governed ERP intelligence platform"
 requires-python = ">=3.11"
-dependencies = ["databricks-sdk==0.168.0", "snowflake-connector-python==5.2.0", "cryptography==50.0.2", "duckdb==1.5.6", "fastapi==0.163.2", "uvicorn==0.54.0"]
+dependencies = ["databricks-sdk==0.168.0", "snowflake-connector-python==5.2.0", "cryptography==50.0.2", "duckdb==1.5.6", "fastapi==0.163.2", "uvicorn==0.54.0", "requests==2.34.2"]
 
 [project.scripts]
 erp-connector = "erp_connectors.cli:main"

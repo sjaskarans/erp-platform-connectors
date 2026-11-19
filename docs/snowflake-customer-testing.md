@@ -15,7 +15,14 @@ here; do not repeat the data-loading script or generate a private key yourself.
    `ERP_CONNECTOR_READER` and `SVC_ERP_CONNECTOR`. These identify the application,
    not your personal Snowflake login. If you have already created these names,
    choose unused names for this new profile.
-5. Add an approved object using the names you loaded:
+5. The default **Discover data from an administrator-approved schema** option
+   needs just database `ERP_DEMO` and schema `ERP_CONNECTOR_DEMO_V1`. Its generated
+   SQL grants access to all current tables/views in that schema, with no future
+   grants. Your administrator must approve that scope. After connecting, browse
+   the schema and select the tables/columns you want the app to use.
+
+   If your administrator requires individual-table source permissions, turn
+   schema discovery off and add an approved object using the names you loaded:
 
    | Field | Example |
    | --- | --- |
@@ -41,13 +48,16 @@ here; do not repeat the data-loading script or generate a private key yourself.
 8. Return to the app and click **I ran the SQL · Test connection**. A successful
    test verifies authentication, the selected warehouse, object visibility,
    and a one-row SELECT for each object with preview columns configured.
-9. Click **Preview** on your connection card. This reads up to five rows of the
+9. For schema discovery, the successful login opens **Browse data**. Navigate
+   databases → schemas → tables/views; select objects and use **Choose columns**
+   for the fields to preview. Save selection, then test access on the card.
+10. Click **Preview** on your connection card. This reads up to five rows of the
    first configured object with preview columns from your actual Snowflake
    account. **Explore sample data** is a separate local demo.
 
 The script creates a TYPE=SERVICE identity, a dedicated reader role, grants that
 role to the service user and SYSADMIN, and grants warehouse/database/schema
-USAGE plus SELECT on the listed tables/views. It does not create, replace, or
+USAGE plus SELECT on the approved current schema contents or listed tables/views. It does not create, replace, or
 reload business tables. Warehouse queries may consume Snowflake credits.
 
 You can finish later and reopen **Setup SQL** without changing the key. After

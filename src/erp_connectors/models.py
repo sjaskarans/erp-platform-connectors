@@ -1,5 +1,17 @@
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, NotRequired, Protocol, TypedDict
+
+
+class MetadataItem(TypedDict):
+    name: str
+    kind: NotRequired[Literal["TABLE", "VIEW"]]
+    type: NotRequired[str]
+
+
+class MetadataPage(TypedDict):
+    items: list[MetadataItem]
+    next_cursor: str | None
+    prefix_case_sensitive: bool
 
 
 @dataclass(frozen=True)

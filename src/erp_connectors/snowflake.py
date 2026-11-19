@@ -8,7 +8,7 @@ import time
 from datetime import date, datetime, timezone
 from decimal import Decimal, DecimalException
 
-from .models import ConnectorError, DataObject, QueryResult, QueryTemplate
+from .models import ConnectorError, DataObject, MetadataPage, QueryResult, QueryTemplate
 
 LOG = logging.getLogger(__name__)
 
@@ -91,6 +91,59 @@ class SnowflakeConnector:
 
     def discover(self):
         return {name: self.describe(name) for name in self.objects}
+
+    def browse(self, level: str, *, database: str = "", schema_name: str = "", table: str = "",
+               after: str = "", prefix: str = "") -> MetadataPage:
+        """Paginated metadata only, under the configured service identity and role."""
+        schema = schema_name
+        if level not in {"databases", "schemas", "objects", "columns"}:
+            raise ValueError("Unknown metadata level")
+        for value in (database, schema, table, after, prefix):
+            if not isinstance(value, str) or len(value) > 255 or any(ord(c) < 32 for c in value):
+                raise ValueError("Invalid metadata filter")
+        if level != "databases" and not database:
+            raise ValueError("Choose a database")
+        if level in {"objects", "columns"} and not schema:
+            raise ValueError("Choose a schema")
+        if level == "columns" and not table:
+            raise ValueError("Choose a table or view")
+        if level == "databases":
+            def literal(value):
+                return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+            sql = "SHOW TERSE DATABASES"
+            if prefix:
+                sql += " STARTS WITH " + literal(prefix)
+            sql += " LIMIT 101"
+            if after:
+                sql += " FROM " + literal(after)
+            result = self._run("browse:databases", sql, ())
+            names = [c["name"].lower() for c in result.columns]
+            if "name" not in names:
+                raise ConnectorError("INVALID_METADATA_RESULT", result.statement_id)
+            items = [{"name": row[names.index("name")]} for row in result.rows]
+        else:
+            info = quote_identifier(database) + ".INFORMATION_SCHEMA."
+            if level == "schemas":
+                sql = f"""SELECT SCHEMA_NAME FROM {info}SCHEMATA
+                    WHERE SCHEMA_NAME <> 'INFORMATION_SCHEMA' AND SCHEMA_NAME > ?
+                    AND STARTSWITH(SCHEMA_NAME, ?) ORDER BY SCHEMA_NAME LIMIT 101"""
+                params = (after, prefix)
+            elif level == "objects":
+                sql = f"""SELECT TABLE_NAME, TABLE_TYPE FROM {info}TABLES
+                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME > ? AND STARTSWITH(TABLE_NAME, ?)
+                    AND TABLE_TYPE IN ('BASE TABLE', 'VIEW') ORDER BY TABLE_NAME LIMIT 101"""
+                params = (schema, after, prefix)
+            else:
+                sql = f"""SELECT COLUMN_NAME, DATA_TYPE FROM {info}COLUMNS
+                    WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME > ?
+                    AND STARTSWITH(COLUMN_NAME, ?) ORDER BY COLUMN_NAME LIMIT 101"""
+                params = (schema, table, after, prefix)
+            result = self._run("browse:" + level, sql, params)
+            items = [{"name": row[0], **({"kind": "VIEW" if row[1] == "VIEW" else "TABLE"}
+                      if level == "objects" else {"type": row[1]} if level == "columns" else {})}
+                     for row in result.rows]
+        return {"items": items[:100], "next_cursor": items[99]["name"] if len(items) > 100 else None,
+                "prefix_case_sensitive": True}
 
     def preview(self, object_id, limit=20):
         obj = self.objects[object_id]

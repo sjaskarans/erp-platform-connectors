@@ -13,7 +13,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
 from .models import ConnectorError
-from .connections import ConnectionPayload, ConnectionStore, runtime_connector
+from . import __version__
+from .connections import BrowseInput, ObjectSelectionInput, ConnectionPayload, ConnectionStore, runtime_connector
 
 
 class QueryInput(BaseModel):
@@ -52,7 +53,7 @@ def create_app(connector=None):
         if not credentials or not secrets.compare_digest(credentials.credentials, token):
             raise HTTPException(401, "Invalid API token", headers={"WWW-Authenticate": "Bearer"})
 
-    app = FastAPI(title="ERP connector test service", lifespan=lifespan,
+    app = FastAPI(title="ERP connector reference service", version=__version__, lifespan=lifespan,
                   dependencies=[Depends(authorized)])
     store = ConnectionStore(Path(os.environ.get("ERP_CONNECTION_DB", ".local-connections/profiles.sqlite3")))
 
@@ -115,7 +116,7 @@ def create_app(connector=None):
         except Exception:
             error_code = "AUTHENTICATION_OR_NETWORK_ERROR"
         try:
-            return store.record_test(connection_id, version, error_code)
+            return store.record_test(connection_id, version, error_code, has_objects=bool(config["objects"]))
         except ValueError:
             raise HTTPException(409, "Connection changed; test the updated configuration") from None
 
@@ -129,6 +130,51 @@ def create_app(connector=None):
             raise HTTPException(400, "Setup is available for Snowflake only") from None
         except RuntimeError:
             raise HTTPException(503, "Windows secret protection is unavailable") from None
+
+    @app.post("/v1/connections/{connection_id}/browse")
+    def browse_connection(connection_id: str, body: BrowseInput):
+        try:
+            config, secret, _ = store.runtime(connection_id)
+            if config.get("platform") != "snowflake":
+                raise ValueError("Data browsing is available for Snowflake only")
+            return runtime_connector(config, secret).browse(**body.model_dump())
+        except KeyError:
+            raise HTTPException(404, "Connection not found") from None
+        except ValueError:
+            raise HTTPException(400, "Choose a valid Snowflake database, schema, or object") from None
+        except ConnectorError as error:
+            raise HTTPException(502, {"code": error.code, "statement_id": error.statement_id}) from None
+        except Exception:
+            raise HTTPException(502, "Data browsing could not be completed. Test this connection first.") from None
+
+    @app.post("/v1/connections/{connection_id}/selection")
+    def select_connection_objects(connection_id: str, body: ObjectSelectionInput):
+        try:
+            config, secret, version = store.runtime(connection_id)
+            if version != body.version:
+                raise HTTPException(409, "Connection changed; reopen Browse data before saving")
+            if config.get("platform") != "snowflake":
+                raise HTTPException(400, "Data selection is available for Snowflake only")
+            live = runtime_connector(config, secret)
+            # Validate against live metadata; never accept invented column names.
+            from .models import DataObject
+            for obj in body.objects:
+                live.objects[obj.name] = DataObject(obj.catalog, obj.schema_name, obj.table_name)
+                metadata = live.describe(obj.name)
+                columns = {row[0] for row in metadata.rows}
+                if not columns or not set(obj.preview_columns).issubset(columns):
+                    raise HTTPException(400, "An object or column is unavailable. Refresh its metadata and select again.")
+            return store.select_objects(connection_id, body)
+        except HTTPException:
+            raise
+        except KeyError:
+            raise HTTPException(404, "Connection not found") from None
+        except ValueError:
+            raise HTTPException(409, "Connection changed; reopen Browse data before saving") from None
+        except ConnectorError as error:
+            raise HTTPException(502, {"code": error.code, "statement_id": error.statement_id}) from None
+        except Exception:
+            raise HTTPException(502, "Selection could not be checked. Test this connection first.") from None
 
     @app.get("/v1/connections/{connection_id}/objects/{object_id}/preview")
     def connection_preview(connection_id: str, object_id: str, limit: int = Query(5, ge=1, le=100)):
