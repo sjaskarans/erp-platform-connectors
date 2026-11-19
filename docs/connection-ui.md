@@ -27,29 +27,38 @@ the Python installation from README and `npm install` in `frontend` first.
 2. Select **Databricks** or **Snowflake** and name the profile. Databricks uses
    its workspace URL and warehouse ID; Snowflake uses its account identifier,
    warehouse, and reader role.
-3. For Databricks, enter the service principal client ID and OAuth secret. For
-   Snowflake, enter the dedicated service username, RSA PEM private key, and its
-   passphrase. See [Snowflake setup](snowflake-setup.md) for identity provisioning.
-4. Register approved objects: a short object label, catalog, schema, and table
-   or view. Add explicit preview columns if you want row previews; leave them
-   blank to disable previews.
-5. Choose **Save for later** to persist an unverified profile, or **Save & test
-   connection** to also check warehouse access and object metadata visibility.
-6. After verification, use **Preview** to fetch up to five rows of approved
-   columns from the first object with preview columns configured.
+3. For Databricks, enter the service principal client ID and OAuth secret.
+   For Snowflake, choose a **new** dedicated service username and reader role.
+   The app generates the RSA private key on the backend and encrypts it with Windows DPAPI.
+4. Register approved objects: a short label, database/catalog, schema, and table
+   or view. Select the Snowflake object type. Enter exact stored names (usually
+   uppercase for Snowflake), and explicit preview columns to enable row previews.
+5. For Snowflake, choose **Continue to setup SQL**, copy the generated SQL, and
+   run it once in your Snowflake worksheet using an administrator authorized to
+   create identities and grant access. Your personal trial can use ACCOUNTADMIN.
+   Stop if the dedicated user or role already exists; do not overwrite it.
+6. Click **I ran the SQL · Test connection**, then **Preview** on the saved card.
+   Databricks continues to offer **Save for later** and **Save & test connection**.
 
-Saving does not create a workspace, warehouse, service principal, permission
-grant, or business dataset. You need those resources to use a real connection.
-The built-in **Explore sample data** path works without them.
+For Snowflake instructions starting with your already loaded synthetic ERP data,
+see [Customer Snowflake testing](snowflake-customer-testing.md). Do not reload
+or recreate those tables. The setup SQL grants parent/warehouse USAGE and SELECT
+on only the chosen objects. Administrators should inspect it before execution.
 
-The status is deliberately explicit: **Saved · not tested**, **Verified**, or
-**Needs attention**. Verification checks a SQL connection and metadata for the
-configured objects; it is not proof of every database policy or query scenario.
+**Setup SQL** on a saved Snowflake card reopens the same public key and SQL.
+It never generates another key. The script is for initial provisioning, not
+blind reruns: after a profile edit, apply only required grants to the existing
+identity. Editing retains its key and resets verification. For a separate
+identity/key, create a new profile with fresh service user and role names.
 
-Use **Edit** to change a profile. An empty OAuth secret retains that secret; for
-Snowflake, leave both key and passphrase fields empty to retain the stored bundle.
-Provide the replacement key and passphrase together to rotate it. Editing resets
-verification status. Changing platforms requires a separate profile.
+Verification checks the SQL connection and object metadata; objects with preview
+columns also get a one-row SELECT check. Objects without preview columns have
+metadata visibility checked only. Broader queries and policies need separate testing.
+
+Use **Edit** to change profile details. An empty Databricks OAuth secret retains
+the stored secret. The Snowflake UI never asks for a private key. Developer API
+and CLI key import remain available for operator-managed integrations.
+
 Multiple profiles retain separate workspaces, warehouses, identities, secrets,
 and approved object lists. Removing a profile changes only local app state.
 
@@ -60,7 +69,7 @@ and approved object lists. Removing a profile changes only local app state.
 - OAuth secrets and Snowflake key/passphrase bundles are encrypted with Windows DPAPI for the account running the
   backend. They cannot be decrypted simply by copying this database to another
   Windows account or computer under the normal DPAPI user-protection model.
-- A typed secret is temporarily present in the browser form and its POST/PUT
+- A typed Databricks secret is temporarily present in the browser form and its POST/PUT
   request, then cleared after a successful save or closing the form. It is not
   put in browser storage or returned in profile API responses. The local service
   decrypts it only to open that profile's connection.

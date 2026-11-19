@@ -108,6 +108,8 @@ def create_app(connector=None):
             for obj in config["objects"]:
                 if not live.describe(obj["name"]).rows:
                     raise ConnectorError("OBJECT_NOT_VISIBLE")
+                if obj["preview_columns"]:
+                    live.preview(obj["name"], 1)
         except ConnectorError as error:
             error_code = error.code
         except Exception:
@@ -116,6 +118,17 @@ def create_app(connector=None):
             return store.record_test(connection_id, version, error_code)
         except ValueError:
             raise HTTPException(409, "Connection changed; test the updated configuration") from None
+
+    @app.get("/v1/connections/{connection_id}/setup")
+    def connection_setup(connection_id: str):
+        try:
+            return store.snowflake_setup(connection_id)
+        except KeyError:
+            raise HTTPException(404, "Connection not found") from None
+        except ValueError:
+            raise HTTPException(400, "Setup is available for Snowflake only") from None
+        except RuntimeError:
+            raise HTTPException(503, "Windows secret protection is unavailable") from None
 
     @app.get("/v1/connections/{connection_id}/objects/{object_id}/preview")
     def connection_preview(connection_id: str, object_id: str, limit: int = Query(5, ge=1, le=100)):

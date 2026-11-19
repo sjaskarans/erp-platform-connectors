@@ -37,7 +37,7 @@ arbitrary SQL through these endpoints.
 For a user-facing setup screen, run `python -m erp_connectors.demo --ui` with the
 project's Python environment. Open `http://127.0.0.1:3000` to add, edit, test, or
 preview your own named connections. See [the connection UI guide](docs/connection-ui.md).
-Select Databricks or Snowflake when adding a connection. Snowflake's identity,
+Select Databricks or Snowflake when adding a connection. For Snowflake customer onboarding, the app generates and protects its private key and displays public-key setup SQL. If your ERP data is already loaded, follow [customer testing](docs/snowflake-customer-testing.md). Snowflake's identity,
 permissions, CLI, and test-data setup are covered in [the Snowflake guide](docs/snowflake-setup.md).
 Saved profiles use Windows-encrypted secrets and are local to this deployment;
 this is not a hosted multi-tenant service yet.

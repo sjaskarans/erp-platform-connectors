@@ -1,3 +1,9 @@
+> **Customer UI flow:** If you have already loaded the synthetic ERP data,
+> continue with [Customer Snowflake testing](snowflake-customer-testing.md).
+> The app generates and protects its own private key; no local key-generation
+> commands or private-key form input are needed. Manual key provisioning below
+> remains an advanced CLI/API alternative.
+
 # Snowflake connector: local setup and service identity
 
 The second connector uses the official Snowflake Python driver with a dedicated

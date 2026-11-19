@@ -81,9 +81,35 @@ class SnowflakeProfileTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.save(profile(), saved["id"])
 
-    def test_missing_and_invalid_keys_cannot_be_saved(self):
-        with self.assertRaises(ValueError):
-            self.store.save(snowflake_profile(private_key_pem=None, private_key_passphrase=None))
+    def test_missing_key_generates_backend_identity_and_setup_is_stable(self):
+        saved = self.store.save(snowflake_profile(private_key_pem=None, private_key_passphrase=None))
+        setup = self.store.snowflake_setup(saved["id"])
+        self.assertEqual(setup, self.store.snowflake_setup(saved["id"]))
+        self.assertIn('TYPE = SERVICE', setup['sql'])
+        self.assertIn('GRANT SELECT ON TABLE "ERP_DEMO"."APPROVED"."FINANCE_LINES"', setup['sql'])
+        self.assertNotIn('ALL TABLES', setup['sql'])
+        self.assertNotIn('PRIVATE', json.dumps(setup))
+        self.assertNotIn('private_key', json.dumps(saved))
+        secret = json.loads(self.store.runtime(saved['id'])[1])['private_key_pem']
+        self.assertNotIn(secret.encode(), self.path.read_bytes())
+        key = serialization.load_pem_private_key(secret.encode(), password=None)
+        self.assertEqual(key.key_size, 3072)
+        import base64
+        self.assertEqual(key.public_key().public_bytes(serialization.Encoding.DER,
+            serialization.PublicFormat.SubjectPublicKeyInfo), base64.b64decode(setup['public_key']))
+
+    def test_setup_quotes_identifiers_and_literals(self):
+        value = snowflake_profile(private_key_pem=None, private_key_passphrase=None,
+                                 role='reader"quoted', warehouse="warehouse'quoted",
+                                 objects=[{"name": "view", "catalog": "DB", "schema_name": "S",
+                                           "table_name": 'a"b', "object_kind": "VIEW"}])
+        saved = self.store.save(value)
+        sql = self.store.snowflake_setup(saved['id'])['sql']
+        self.assertIn('"reader""quoted"', sql)
+        self.assertIn("'warehouse''quoted'", sql)
+        self.assertIn('GRANT SELECT ON VIEW "DB"."S"."a""b"', sql)
+
+    def test_invalid_keys_cannot_be_saved(self):
         with self.assertRaises(ValueError):
             self.store.save(snowflake_profile(pem="invalid"))
 

@@ -26,6 +26,7 @@ class ObjectInput(BaseModel):
     schema_name: str = Field(min_length=1, max_length=128)
     table_name: str = Field(min_length=1, max_length=128)
     preview_columns: list[str] = Field(default_factory=list, max_length=30)
+    object_kind: Literal["TABLE", "VIEW"] = "TABLE"
 
     @field_validator("name", "catalog", "schema_name", "table_name")
     @classmethod
@@ -224,6 +225,13 @@ class ConnectionStore:
                 raise ValueError("Create a separate profile to change platforms")
             plaintext = None
             if isinstance(value, SnowflakeConnectionInput):
+                if not existing and value.private_key_pem is None and value.private_key_passphrase is None:
+                    from cryptography.hazmat.primitives import serialization
+                    from cryptography.hazmat.primitives.asymmetric import rsa
+                    key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+                    pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                            serialization.NoEncryption()).decode()
+                    plaintext = json.dumps({"private_key_pem": pem, "private_key_passphrase": None})
                 if value.private_key_pem is not None:
                     pem = value.private_key_pem.get_secret_value()
                     password = value.private_key_passphrase.get_secret_value() if value.private_key_passphrase else None
@@ -251,6 +259,49 @@ class ConnectionStore:
         row = self._row(connection_id)
         config = json.loads(row["config"])
         return config, self.vault.reveal(row["secret"]), row["version"]
+
+    def snowflake_setup(self, connection_id):
+        """Only public key material leaves the service. Reading setup never rotates keys."""
+        import base64
+        import hashlib
+        from cryptography.hazmat.primitives import serialization
+        config, secret, version = self.runtime(connection_id)
+        if config.get("platform") != "snowflake":
+            raise ValueError("Setup is available for Snowflake only")
+        bundle = json.loads(secret)
+        key = serialization.load_der_private_key(private_key_der(
+            bundle["private_key_pem"], bundle.get("private_key_passphrase")), password=None)
+        public = key.public_key().public_bytes(serialization.Encoding.DER,
+                                               serialization.PublicFormat.SubjectPublicKeyInfo)
+        public_key = base64.b64encode(public).decode()
+        def ident(value):
+            return '"' + value.replace('"', '""') + '"'
+        def literal(value):
+            return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
+        role, user = ident(config["role"]), ident(config["username"])
+        statements = [
+            "-- Run once as an administrator authorized to create identities and grant source access.",
+            "-- Use NEW dedicated user and role names. Stop on errors; do not overwrite an existing identity.",
+            f"CREATE ROLE {role};",
+            f"CREATE USER {user} TYPE = SERVICE DEFAULT_ROLE = {literal(config['role'])} "
+            f"DEFAULT_WAREHOUSE = {literal(config['warehouse'])} RSA_PUBLIC_KEY = '{public_key}';",
+            f"GRANT ROLE {role} TO USER {user};",
+            f"GRANT ROLE {role} TO ROLE SYSADMIN;",
+            f"GRANT USAGE ON WAREHOUSE {ident(config['warehouse'])} TO ROLE {role};",
+        ]
+        grants = []
+        for obj in config["objects"]:
+            database = ident(obj["catalog"])
+            schema = database + "." + ident(obj["schema_name"])
+            grants.extend([
+                f"GRANT USAGE ON DATABASE {database} TO ROLE {role};",
+                f"GRANT USAGE ON SCHEMA {schema} TO ROLE {role};",
+                f"GRANT SELECT ON {obj.get('object_kind', 'TABLE')} {schema}.{ident(obj['table_name'])} TO ROLE {role};",
+            ])
+        statements.extend(dict.fromkeys(grants))
+        return {"connection_id": connection_id, "version": version, "public_key": public_key,
+                "fingerprint": "SHA256:" + base64.b64encode(hashlib.sha256(public).digest()).decode(),
+                "sql": "\n".join(statements)}
 
     def record_test(self, connection_id, version, error_code=None):
         with self._database() as db:

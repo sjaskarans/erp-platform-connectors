@@ -1,0 +1,68 @@
+# Test Snowflake as a customer
+
+Your Snowflake account, warehouse, and synthetic data already exist. Continue
+here; do not repeat the data-loading script or generate a private key yourself.
+
+1. Open [Connections](http://127.0.0.1:3000), click **Add connection**, and choose
+   **Snowflake**. Name it, for example, `My ERP Snowflake`.
+2. Enter your **account identifier** from Snowflake connection details, such as
+   `organization-account`. Do not enter the Snowsight browser URL. If needed,
+   run `SELECT CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME();`
+   in your Snowflake worksheet to obtain it.
+3. Enter your existing warehouse, e.g. `ERP_API_WH`. If you used a different
+   warehouse when loading data, enter that exact name.
+4. Choose fresh dedicated names for the reader role and service user, e.g.
+   `ERP_CONNECTOR_READER` and `SVC_ERP_CONNECTOR`. These identify the application,
+   not your personal Snowflake login. If you have already created these names,
+   choose unused names for this new profile.
+5. Add an approved object using the names you loaded:
+
+   | Field | Example |
+   | --- | --- |
+   | Object label | `finance_lines` |
+   | Database | `ERP_DEMO` |
+   | Schema | `ERP_CONNECTOR_DEMO_V1` |
+   | Table or view | `FINANCE_LINES` |
+   | Object type | Table |
+   | Preview columns | `COMPANY_CODE, AMOUNT, CURRENCY` |
+
+   Use the actual names shown in your Snowflake account if they differ. Names
+   are case sensitive in the connector because identifiers are quoted exactly.
+   Add more objects now, or begin with this one to test connectivity.
+6. Click **Continue to setup SQL**. The backend generates an RSA 3072-bit keypair,
+   saves the private key encrypted for your Windows user, and displays only
+   the public key inside a provisioning script. No key file or terminal command
+   is required from you.
+7. Click **Copy SQL**. Open a new Snowflake SQL worksheet and select
+   **ACCOUNTADMIN** for your personal trial. In an organization, give the script
+   to the administrator authorized to create users/roles and grant source access.
+   Review and run the statements once, in order; stop on any error. The user and
+   role must be new. Do not replace an existing user's key to make it work.
+8. Return to the app and click **I ran the SQL · Test connection**. A successful
+   test verifies authentication, the selected warehouse, object visibility,
+   and a one-row SELECT for each object with preview columns configured.
+9. Click **Preview** on your connection card. This reads up to five rows of the
+   first configured object with preview columns from your actual Snowflake
+   account. **Explore sample data** is a separate local demo.
+
+The script creates a TYPE=SERVICE identity, a dedicated reader role, grants that
+role to the service user and SYSADMIN, and grants warehouse/database/schema
+USAGE plus SELECT on the listed tables/views. It does not create, replace, or
+reload business tables. Warehouse queries may consume Snowflake credits.
+
+You can finish later and reopen **Setup SQL** without changing the key. After
+editing an existing profile, ask your administrator to apply only necessary
+grant changes rather than rerunning CREATE statements. Removing a local profile
+does not revoke Snowflake access; an administrator must revoke/drop the dedicated
+identity and role separately when retiring it.
+
+If testing fails, confirm account identifier and exact names, all SQL statements
+succeeded, warehouse availability, approved columns, and applicable Snowflake
+network/authentication policies. Do not paste private keys or passwords into chat.
+
+This is the customer onboarding experience running locally. Windows DPAPI
+protects local credentials; hosted multi-customer deployment still requires
+sign-in, tenant isolation, managed secret storage, and credential rotation.
+
+References: [Snowflake service users](https://docs.snowflake.com/en/sql-reference/sql/create-user)
+and [key-pair authentication](https://docs.snowflake.com/en/user-guide/key-pair-auth).

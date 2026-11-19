@@ -132,6 +132,25 @@ class DemoHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertNotIn("sensitive-do-not-echo", response.text)
 
+    def test_generated_snowflake_customer_setup_through_gateway(self):
+        from erp_connectors.connections import connection_request_body
+        from test_snowflake_profiles import snowflake_profile
+        values = connection_request_body(snowflake_profile(private_key_pem=None, private_key_passphrase=None))
+        response = requests.post(self.url + "/v1/connections", headers=self.headers,
+                                 json=values, timeout=10, proxies={"http": "", "https": ""})
+        self.assertEqual(response.status_code, 201, response.text)
+        connection_id = response.json()['id']
+        try:
+            setup = self.get(f'/v1/connections/{connection_id}/setup')
+            self.assertEqual(setup.status_code, 200, setup.text)
+            self.assertIn('TYPE = SERVICE', setup.json()['sql'])
+            self.assertNotIn('PRIVATE', setup.text)
+            self.assertEqual(setup.json(), self.get(f'/v1/connections/{connection_id}/setup').json())
+            self.assertNotIn('private_key', self.get('/v1/connections').text)
+        finally:
+            requests.delete(self.url + '/v1/connections/' + connection_id, headers=self.headers,
+                            timeout=5, proxies={"http": "", "https": ""})
+
     def test_snowflake_key_profile_through_gateway(self):
         from erp_connectors.connections import connection_request_body
         from test_snowflake_profiles import snowflake_profile

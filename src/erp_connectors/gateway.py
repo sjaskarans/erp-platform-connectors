@@ -92,6 +92,11 @@ def create_app():
         from urllib.parse import quote
         return forward("POST", f"/v1/connections/{quote(connection_id, safe='')}/test")
 
+    @app.get("/v1/connections/{connection_id}/setup")
+    def connection_setup(connection_id: str):
+        from urllib.parse import quote
+        return forward("GET", f"/v1/connections/{quote(connection_id, safe='')}/setup")
+
     @app.get("/v1/connections/{connection_id}/objects/{object_id}/preview")
     def connection_preview(connection_id: str, object_id: str, limit: int = Query(5, ge=1, le=100)):
         from urllib.parse import quote
