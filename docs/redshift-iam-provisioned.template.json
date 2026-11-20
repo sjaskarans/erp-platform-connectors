@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ExecuteOnlyOnApprovedCluster",
+      "Effect": "Allow",
+      "Action": "redshift-data:ExecuteStatement",
+      "Resource": "arn:aws:redshift:<REGION>:<ACCOUNT_ID>:cluster:<CLUSTER_NAME>"
+    },
+    {
+      "Sid": "TemporaryIAMDatabaseCredentials",
+      "Effect": "Allow",
+      "Action": "redshift:GetClusterCredentialsWithIAM",
+      "Resource": "arn:aws:redshift:<REGION>:<ACCOUNT_ID>:dbname:<CLUSTER_NAME>/<DATABASE_NAME>"
+    },
+    {
+      "Sid": "ReadOrCancelOwnStatements",
+      "Effect": "Allow",
+      "Action": ["redshift-data:DescribeStatement", "redshift-data:GetStatementResult", "redshift-data:CancelStatement"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"redshift-data:statement-owner-iam-userid": "${aws:userid}"}}
+    }
+  ]
+}

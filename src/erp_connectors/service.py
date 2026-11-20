@@ -37,6 +37,9 @@ def create_app(connector=None):
         elif mode == "snowflake":
             from .cli import load_snowflake_connector
             connector = load_snowflake_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
+        elif mode == "redshift":
+            from .cli import load_redshift_connector
+            connector = load_redshift_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
         else:
             raise RuntimeError("Unknown connector mode")
 
@@ -103,6 +106,7 @@ def create_app(connector=None):
         except RuntimeError:
             raise HTTPException(503, "Windows secret protection is unavailable") from None
         error_code = None
+        live = None
         try:
             live = runtime_connector(config, secret)
             live.check_connection()
@@ -115,6 +119,8 @@ def create_app(connector=None):
             error_code = error.code
         except Exception:
             error_code = "AUTHENTICATION_OR_NETWORK_ERROR"
+        finally:
+            release(live)
         try:
             return store.record_test(connection_id, version, error_code, has_objects=bool(config["objects"]))
         except ValueError:
@@ -133,34 +139,43 @@ def create_app(connector=None):
 
     @app.post("/v1/connections/{connection_id}/browse")
     def browse_connection(connection_id: str, body: BrowseInput):
+        live = None
         try:
             config, secret, _ = store.runtime(connection_id)
-            if config.get("platform") != "snowflake":
-                raise ValueError("Data browsing is available for Snowflake only")
-            return runtime_connector(config, secret).browse(**body.model_dump())
+            if config.get("platform") not in {"snowflake", "redshift"}:
+                raise ValueError("Data browsing is available for Snowflake and Redshift")
+            live = runtime_connector(config, secret)
+            return live.browse(**body.model_dump())
         except KeyError:
             raise HTTPException(404, "Connection not found") from None
         except ValueError:
-            raise HTTPException(400, "Choose a valid Snowflake database, schema, or object") from None
+            raise HTTPException(400, "Choose a valid database, schema, or object for this connection") from None
         except ConnectorError as error:
             raise HTTPException(502, {"code": error.code, "statement_id": error.statement_id}) from None
         except Exception:
             raise HTTPException(502, "Data browsing could not be completed. Test this connection first.") from None
+        finally:
+            release(live)
 
     @app.post("/v1/connections/{connection_id}/selection")
     def select_connection_objects(connection_id: str, body: ObjectSelectionInput):
+        live = None
         try:
             config, secret, version = store.runtime(connection_id)
             if version != body.version:
                 raise HTTPException(409, "Connection changed; reopen Browse data before saving")
-            if config.get("platform") != "snowflake":
-                raise HTTPException(400, "Data selection is available for Snowflake only")
-            live = runtime_connector(config, secret)
+            if config.get("platform") not in {"snowflake", "redshift"}:
+                raise HTTPException(400, "Data selection is available for Snowflake and Redshift")
+            if body.objects:
+                live = runtime_connector(config, secret)
             # Validate against live metadata; never accept invented column names.
             from .models import DataObject
             for obj in body.objects:
                 live.objects[obj.name] = DataObject(obj.catalog, obj.schema_name, obj.table_name)
-                metadata = live.describe(obj.name)
+                try:
+                    metadata = live.describe(obj.name)
+                except ValueError:
+                    raise HTTPException(400, "Choose objects in the configured database with valid names") from None
                 columns = {row[0] for row in metadata.rows}
                 if not columns or not set(obj.preview_columns).issubset(columns):
                     raise HTTPException(400, "An object or column is unavailable. Refresh its metadata and select again.")
@@ -175,6 +190,8 @@ def create_app(connector=None):
             raise HTTPException(502, {"code": error.code, "statement_id": error.statement_id}) from None
         except Exception:
             raise HTTPException(502, "Selection could not be checked. Test this connection first.") from None
+        finally:
+            release(live)
 
     @app.get("/v1/connections/{connection_id}/objects/{object_id}/preview")
     def connection_preview(connection_id: str, object_id: str, limit: int = Query(5, ge=1, le=100)):
@@ -185,7 +202,18 @@ def create_app(connector=None):
             raise HTTPException(404, "Connection not found") from None
         except Exception:
             raise HTTPException(502, "Connection could not be opened") from None
-        return invoke(live.preview, object_id, limit)
+        try:
+            return invoke(live.preview, object_id, limit)
+        finally:
+            release(live)
+
+    def release(live):
+        close = getattr(live, "close", None)
+        if close:
+            try:
+                close()
+            except Exception:
+                pass
 
     def invoke(function, *args):
         try:

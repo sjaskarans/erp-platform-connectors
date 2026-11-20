@@ -1,0 +1,24 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ExecuteOnlyOnApprovedWorkgroup",
+      "Effect": "Allow",
+      "Action": "redshift-data:ExecuteStatement",
+      "Resource": "arn:aws:redshift-serverless:<REGION>:<ACCOUNT_ID>:workgroup/<WORKGROUP_ID>"
+    },
+    {
+      "Sid": "TemporaryIAMDatabaseCredentials",
+      "Effect": "Allow",
+      "Action": "redshift-serverless:GetCredentials",
+      "Resource": "arn:aws:redshift-serverless:<REGION>:<ACCOUNT_ID>:workgroup/<WORKGROUP_ID>"
+    },
+    {
+      "Sid": "ReadOrCancelOwnStatements",
+      "Effect": "Allow",
+      "Action": ["redshift-data:DescribeStatement", "redshift-data:GetStatementResult", "redshift-data:CancelStatement"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"redshift-data:statement-owner-iam-userid": "${aws:userid}"}}
+    }
+  ]
+}

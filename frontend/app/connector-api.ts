@@ -7,7 +7,7 @@ export async function api<T>(path: string, method = "GET", body?: unknown): Prom
   const data = await response.json();
   if (!response.ok) {
     const detail = typeof data.detail === "string" ? data.detail
-      : data.detail?.code ? `Snowflake request failed (${data.detail.code}). Check this connection's identity and source permissions.`
+      : data.detail?.code ? `Connector request failed (${data.detail.code}). Check this connection's identity and source permissions.`
       : "The request could not be completed. Check your configuration.";
     throw new Error(detail);
   }

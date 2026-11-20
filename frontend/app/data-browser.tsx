@@ -7,11 +7,11 @@ export type SelectedObject = { name: string; catalog: string; schema_name: strin
 type Item = { name: string; kind?: "TABLE" | "VIEW"; type?: string };
 type Page = { items: Item[]; next_cursor: string | null };
 type Location = { database: string; schema_name: string; table: string };
-type Props = { id: string; version: number; initial: SelectedObject[]; onSaved: () => Promise<void>; onClose: () => void };
+type Props = { platform: "snowflake" | "redshift"; id: string; version: number; initial: SelectedObject[]; onSaved: () => Promise<void>; onClose: () => void };
 const keyOf = (o: SelectedObject) => JSON.stringify([o.catalog, o.schema_name, o.table_name]);
 const newLabel = () => `object_${crypto.randomUUID().replaceAll("-", "")}`;
 
-export default function DataBrowser({ id, version, initial, onSaved, onClose }: Props) {
+export default function DataBrowser({ platform, id, version, initial, onSaved, onClose }: Props) {
   const [location, setLocation] = useState<Location>({ database: "", schema_name: "", table: "" });
   const [items, setItems] = useState<Item[]>([]);
   const [next, setNext] = useState<string | null>(null);
@@ -91,15 +91,15 @@ export default function DataBrowser({ id, version, initial, onSaved, onClose }: 
     if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes.at(-1)?.focus(); }
     else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
   }}>
-    <div className="dialog-head"><div><span className="eyebrow">SNOWFLAKE · DATA SELECTION</span><h2 id="browser-title">Browse your data</h2><p>Choose from objects visible to your service role.</p></div><button aria-label="Close data browser" disabled={saving} onClick={close}>✕</button></div>
+    <div className="dialog-head"><div><span className="eyebrow">{platform === "redshift" ? "AMAZON REDSHIFT" : "SNOWFLAKE"} · DATA SELECTION</span><h2 id="browser-title">Browse your data</h2><p>Choose from objects visible to your service role.</p></div><button aria-label="Close data browser" disabled={saving} onClick={close}>✕</button></div>
     <div className="dialog-body">
       <div className="browser-path"><button className="text-button" disabled={saving} onClick={() => navigate({ database: "", schema_name: "", table: "" })}>Databases</button>{location.database && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ database: location.database, schema_name: "", table: "" })}>{location.database}</button></>}{location.schema_name && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ ...location, table: "" })}>{location.schema_name}</button></>}{location.table && <span>/ {location.table}</span>}</div>
-      <form className="browser-search" onSubmit={event => { event.preventDefault(); void load(location, "", prefix); }}><label>Search {level}<input value={prefix} disabled={saving} maxLength={255} onChange={e => setPrefix(e.target.value)} placeholder="Name starts with…"/><small>Exact case, usually uppercase. Results load in pages of 100.</small></label><button className="secondary" disabled={loading || saving}>Search</button></form>
+      <form className="browser-search" onSubmit={event => { event.preventDefault(); void load(location, "", prefix); }}><label>Search {level}<input value={prefix} disabled={saving} maxLength={255} onChange={e => setPrefix(e.target.value)} placeholder="Name starts with…"/><small>Exact case, usually {platform === "redshift" ? "lowercase" : "uppercase"}. Results load in pages of 100.</small></label><button className="secondary" disabled={loading || saving}>Search</button></form>
       <div className="browser-summary"><strong>{selection.length}/30 objects selected</strong>{(level === "objects" || level === "columns") && <button className="text-button" disabled={loading || saving || !items.length || (level === "columns" && !active)} onClick={selectVisible}>Select listed {level === "objects" ? "objects" : "columns"}</button>}</div>
       {error && <div role="alert" className="notice error">{error}</div>}
       {level === "columns" && <p>{active ? `${active.preview_columns.length}/30 preview columns selected. No columns means metadata access only in the app.` : "Select this object before choosing preview columns."}</p>}
       {loading && <p role="status">Loading accessible {level}…</p>}
-      {!loading && !items.length && <div className="browser-empty">No matching {level} are visible. Check the search case, refresh metadata, or ask the client’s Snowflake administrator to grant access. The app cannot grant itself source permissions.</div>}
+      {!loading && !items.length && <div className="browser-empty">No matching {level} are visible. Check the search case, refresh metadata, or ask the client’s database administrator to grant access. The app cannot grant itself source permissions.</div>}
       <div className="browser-items">{items.map(item => <div className="browser-row" key={item.name}>
         {level === "databases" || level === "schemas" ? <button className="browser-name" disabled={saving} onClick={() => navigate(level === "databases" ? { database: item.name, schema_name: "", table: "" } : { ...location, schema_name: item.name, table: "" })}>{item.name}<span>Browse →</span></button>
         : level === "objects" ? <><label className="browser-check"><input type="checkbox" disabled={saving} checked={selection.some(o => o.catalog === location.database && o.schema_name === location.schema_name && o.table_name === item.name)} onChange={() => toggleObject(item)}/><span>{item.name}<small>{item.kind}</small></span></label><button className="text-button" disabled={saving} onClick={() => navigate({ ...location, table: item.name })}>Choose columns</button></>
@@ -107,7 +107,7 @@ export default function DataBrowser({ id, version, initial, onSaved, onClose }: 
       </div>)}</div>
       {next && <button className="secondary" disabled={loading || saving} onClick={() => void load(location, next, loadedPrefix)}>Load next 100</button>}
       <details className="browser-selected"><summary>Review selected objects ({selection.length})</summary>{selection.map(object => <div className="browser-row" key={keyOf(object)}><span>{object.catalog}.{object.schema_name}.{object.table_name}<small>{object.preview_columns.length} preview columns</small></span><button className="text-button" disabled={saving} onClick={() => { setSelection(previous => previous.filter(o => keyOf(o) !== keyOf(object))); setDirty(true); }}>Remove</button></div>)}</details>
-      <p className="form-hint">Browsing reads metadata only. Saving checks object and column names and retains your existing key. Selection controls the app’s allowlist; Snowflake permissions remain under the client’s administrator. New tables are never selected automatically.</p>
+      <p className="form-hint">Browsing reads metadata only. Saving checks object and column names and retains your existing key. Selection controls the app’s allowlist; Source permissions remain under the client’s administrator. New tables are never selected automatically.</p>
     </div>
     <div className="dialog-actions"><button className="secondary" disabled={saving} onClick={close}>Cancel</button><button className="primary" disabled={saving || loading || !dirty} onClick={save}>{saving ? "Checking selection…" : "Save selection"}</button></div>
   </div></div>;

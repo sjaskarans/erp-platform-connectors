@@ -1,0 +1,197 @@
+{
+  "objects": [
+    {
+      "name": "companies",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "companies",
+      "preview_columns": [
+        "company_code",
+        "source_system",
+        "name",
+        "currency"
+      ]
+    },
+    {
+      "name": "customers",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "customers",
+      "preview_columns": [
+        "customer_id",
+        "company_code",
+        "name"
+      ]
+    },
+    {
+      "name": "suppliers",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "suppliers",
+      "preview_columns": [
+        "supplier_id",
+        "company_code",
+        "name"
+      ]
+    },
+    {
+      "name": "finance_lines",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "finance_lines",
+      "preview_columns": [
+        "company_code",
+        "fiscal_year",
+        "document_id",
+        "account",
+        "amount",
+        "currency",
+        "posting_date"
+      ]
+    },
+    {
+      "name": "receivables",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "receivables",
+      "preview_columns": [
+        "company_code",
+        "invoice_id",
+        "customer_id",
+        "due_date",
+        "outstanding_amount",
+        "currency",
+        "disputed"
+      ]
+    },
+    {
+      "name": "payables",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "payables",
+      "preview_columns": [
+        "company_code",
+        "invoice_id",
+        "supplier_id",
+        "due_date",
+        "outstanding_amount",
+        "currency"
+      ]
+    },
+    {
+      "name": "inventory_positions",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "inventory_positions",
+      "preview_columns": [
+        "company_code",
+        "material_id",
+        "quantity",
+        "unit_cost",
+        "currency"
+      ]
+    },
+    {
+      "name": "sales_orders",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "sales_orders",
+      "preview_columns": [
+        "company_code",
+        "order_id",
+        "status",
+        "amount",
+        "currency"
+      ]
+    },
+    {
+      "name": "purchase_orders",
+      "catalog": "dev",
+      "schema_name": "erp_connector_demo_v1",
+      "table_name": "purchase_orders",
+      "preview_columns": [
+        "company_code",
+        "order_id",
+        "status",
+        "amount",
+        "currency"
+      ]
+    }
+  ],
+  "queries": {
+    "finance_by_currency": {
+      "statement": "SELECT currency, SUM(amount) AS amount FROM \"erp_connector_demo_v1\".\"finance_lines\" WHERE company_code = :company_code GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        }
+      ]
+    },
+    "overdue_receivables": {
+      "statement": "SELECT currency, SUM(outstanding_amount) AS amount FROM \"erp_connector_demo_v1\".\"receivables\" WHERE company_code = :company_code AND due_date < CAST(:as_of_date AS DATE) AND outstanding_amount > 0 AND disputed = false GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        },
+        {
+          "name": "as_of_date",
+          "type": "DATE"
+        }
+      ]
+    },
+    "overdue_payables": {
+      "statement": "SELECT currency, SUM(outstanding_amount) AS amount FROM \"erp_connector_demo_v1\".\"payables\" WHERE company_code = :company_code AND due_date < CAST(:as_of_date AS DATE) AND outstanding_amount > 0 GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        },
+        {
+          "name": "as_of_date",
+          "type": "DATE"
+        }
+      ]
+    },
+    "inventory_valuation": {
+      "statement": "SELECT currency, SUM(quantity * unit_cost) AS known_value, SUM(CASE WHEN unit_cost IS NULL THEN 1 ELSE 0 END) AS missing_cost_rows FROM \"erp_connector_demo_v1\".\"inventory_positions\" WHERE company_code = :company_code GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        }
+      ]
+    },
+    "open_sales_orders": {
+      "statement": "SELECT currency, SUM(amount) AS amount FROM \"erp_connector_demo_v1\".\"sales_orders\" WHERE company_code = :company_code AND status = 'OPEN' GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        }
+      ]
+    },
+    "open_purchase_orders": {
+      "statement": "SELECT currency, SUM(amount) AS amount FROM \"erp_connector_demo_v1\".\"purchase_orders\" WHERE company_code = :company_code AND status = 'OPEN' GROUP BY currency ORDER BY currency",
+      "parameters": [
+        {
+          "name": "company_code",
+          "type": "STRING"
+        }
+      ]
+    }
+  },
+  "limits": {
+    "max_rows": 1000,
+    "max_bytes": 4000000,
+    "timeout_seconds": 120
+  },
+  "platform": "redshift",
+  "name": "Redshift synthetic ERP",
+  "region": "us-east-1",
+  "deployment": "serverless",
+  "database": "dev",
+  "workgroup_name": "erp-test",
+  "aws_profile": "erp-connector"
+}

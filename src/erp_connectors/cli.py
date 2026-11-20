@@ -81,15 +81,34 @@ def load_snowflake_connector(path: str, *, passphrase: str | None = None):
     return SnowflakeConnector(live.connection_factory, live.objects, queries, **config.get("limits", {}))
 
 
+def load_redshift_connector(path: str):
+    from .connections import RedshiftConnectionInput, runtime_connector
+    from .redshift import RedshiftConnector
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    profile = RedshiftConnectionInput.model_validate({key: value for key, value in config.items() if key not in {"queries", "limits"}})
+    live = runtime_connector(profile.model_dump(), "")
+    queries = {name: QueryTemplate(value["statement"], tuple(Parameter(**p) for p in value.get("parameters", [])))
+               for name, value in config.get("queries", {}).items()}
+    return RedshiftConnector(live.client, live.database, live.objects, queries,
+        workgroup_name=profile.workgroup_name, cluster_identifier=profile.cluster_identifier, **config.get("limits", {}))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only ERP platform connector")
     parser.add_argument("--config", default="connector.local.json")
-    parser.add_argument("--platform", choices=["databricks", "snowflake"], default="databricks")
+    parser.add_argument("--platform", choices=["databricks", "snowflake", "redshift"], default="databricks")
     parser.add_argument("--prompt-secret", action="store_true",
                         help="Prompt for the Databricks OAuth secret or Snowflake key passphrase")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check")
     commands.add_parser("discover")
+    browse = commands.add_parser("browse")
+    browse.add_argument("level", choices=["databases", "schemas", "objects", "columns"])
+    browse.add_argument("--database", default="")
+    browse.add_argument("--schema", default="")
+    browse.add_argument("--table", default="")
+    browse.add_argument("--prefix", default="")
+    browse.add_argument("--after", default="")
     describe = commands.add_parser("describe")
     describe.add_argument("object_id")
     preview = commands.add_parser("preview")
@@ -101,8 +120,13 @@ def main() -> int:
     args = parser.parse_args()
     logging.basicConfig(level=logging.WARNING)
     logging.getLogger("erp_connectors").setLevel(logging.INFO)
+    connector = None
     try:
-        if args.platform == "snowflake":
+        if args.platform == "redshift":
+            if args.prompt_secret:
+                raise ValueError("Redshift uses the AWS credential provider, not a password prompt")
+            connector = load_redshift_connector(args.config)
+        elif args.platform == "snowflake":
             password = None
             if args.prompt_secret:
                 with warnings.catch_warnings():
@@ -116,6 +140,9 @@ def main() -> int:
             output = asdict(connector.check_connection())
         elif args.command == "discover":
             output = {name: asdict(result) for name, result in connector.discover().items()}
+        elif args.command == "browse":
+            output = connector.browse(args.level, database=args.database or getattr(connector, "database", ""),
+                schema_name=args.schema, table=args.table, prefix=args.prefix, after=args.after)
         elif args.command == "describe":
             output = asdict(connector.describe(args.object_id))
         elif args.command == "preview":
@@ -134,6 +161,13 @@ def main() -> int:
         # Do not print SDK exception text, credentials, configuration, or SQL.
         print(json.dumps({"error": "CONFIGURATION_OR_AUTHENTICATION_ERROR"}))
         return 1
+    finally:
+        close = getattr(connector, "close", None)
+        if close:
+            try:
+                close()
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

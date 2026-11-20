@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ERP connector reference service",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "paths": {
     "/v1/connections": {
@@ -38,6 +38,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/SnowflakeConnectionInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RedshiftConnectionInput"
                   }
                 ],
                 "title": "Body"
@@ -104,6 +107,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/SnowflakeConnectionInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RedshiftConnectionInput"
                   }
                 ],
                 "title": "Body"
@@ -868,6 +874,101 @@
           "parameters"
         ],
         "title": "QueryInput"
+      },
+      "RedshiftConnectionInput": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "const": "redshift",
+            "title": "Platform"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "region": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[a-z]{2}(?:-[a-z0-9]+)+-\\d+$",
+            "title": "Region"
+          },
+          "deployment": {
+            "type": "string",
+            "enum": [
+              "serverless",
+              "provisioned"
+            ],
+            "title": "Deployment"
+          },
+          "database": {
+            "type": "string",
+            "maxLength": 127,
+            "minLength": 1,
+            "title": "Database"
+          },
+          "workgroup_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 3,
+                "pattern": "^[a-z0-9-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workgroup Name"
+          },
+          "cluster_identifier": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 63,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cluster Identifier"
+          },
+          "aws_profile": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9_.@+-]+$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Aws Profile"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectInput"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Objects"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "platform",
+          "name",
+          "region",
+          "deployment",
+          "database"
+        ],
+        "title": "RedshiftConnectionInput"
       },
       "SnowflakeAccessScope": {
         "properties": {

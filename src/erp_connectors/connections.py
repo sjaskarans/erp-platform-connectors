@@ -13,7 +13,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 from .databricks import DatabricksConnector
 from .models import DataObject
@@ -139,7 +139,37 @@ class SnowflakeConnectionInput(BaseModel):
         return value
 
 
-ConnectionPayload = ConnectionInput | SnowflakeConnectionInput
+class RedshiftConnectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    platform: Literal["redshift"]
+    name: str = Field(min_length=1, max_length=100)
+    region: str = Field(max_length=64, pattern=r"^[a-z]{2}(?:-[a-z0-9]+)+-\d+$")
+    deployment: Literal["serverless", "provisioned"]
+    database: str = Field(min_length=1, max_length=127)
+    workgroup_name: str | None = Field(default=None, min_length=3, max_length=64, pattern=r"^[a-z0-9-]+$")
+    cluster_identifier: str | None = Field(default=None, min_length=1, max_length=63, pattern=r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
+    aws_profile: str | None = Field(default=None, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_.@+-]+$")
+    objects: list[ObjectInput] = Field(default_factory=list, max_length=30)
+    _name = field_validator("name")(ConnectionInput.display_name.__func__)
+    _objects = field_validator("objects")(ConnectionInput.unique_objects.__func__)
+
+    @model_validator(mode="after")
+    def target(self):
+        from .redshift import quote_identifier
+        quote_identifier(self.database)
+        if self.deployment == "serverless" and (not self.workgroup_name or self.cluster_identifier):
+            raise ValueError("Serverless requires a workgroup name only")
+        if self.deployment == "provisioned" and (not self.cluster_identifier or self.workgroup_name):
+            raise ValueError("Provisioned requires a cluster identifier only")
+        if any(obj.catalog != self.database for obj in self.objects):
+            raise ValueError("Selected objects must belong to the configured database")
+        for obj in self.objects:
+            for value in (obj.schema_name, obj.table_name, *obj.preview_columns):
+                quote_identifier(value)
+        return self
+
+
+ConnectionPayload = ConnectionInput | SnowflakeConnectionInput | RedshiftConnectionInput
 SECRET_FIELDS = {"client_secret", "private_key_pem", "private_key_passphrase"}
 
 
@@ -235,7 +265,7 @@ class ConnectionStore:
     def public(self, row):
         config = json.loads(row["config"])
         config.setdefault("platform", "databricks")
-        return {"id": row["id"], **config, "secret_configured": True,
+        return {"id": row["id"], **config, "secret_configured": config.get("platform") != "redshift",
                 "version": row["version"], "status": row["status"],
                 "checked_at": row["checked_at"], "error_code": row["error_code"]}
 
@@ -264,9 +294,10 @@ class ConnectionStore:
                     plaintext = json.dumps({"private_key_pem": pem, "private_key_passphrase": password})
                 elif value.private_key_passphrase is not None:
                     raise ValueError("Provide the key when replacing its passphrase")
-            elif value.client_secret:
+            elif isinstance(value, ConnectionInput) and value.client_secret:
                 plaintext = value.client_secret.get_secret_value()
-            secret = self.vault.protect(plaintext) if plaintext is not None else existing["secret"] if existing else None
+            secret = (b"" if isinstance(value, RedshiftConnectionInput) else
+                      self.vault.protect(plaintext) if plaintext is not None else existing["secret"] if existing else None)
             if secret is None:
                 raise ValueError("Credentials are required for a new connection")
             config = value.model_dump(exclude=SECRET_FIELDS)
@@ -283,15 +314,17 @@ class ConnectionStore:
     def runtime(self, connection_id):
         row = self._row(connection_id)
         config = json.loads(row["config"])
-        return config, self.vault.reveal(row["secret"]), row["version"]
+        return config, "" if config.get("platform") == "redshift" else self.vault.reveal(row["secret"]), row["version"]
 
     def select_objects(self, connection_id, value: ObjectSelectionInput):
         """Versioned selection update that cannot replace identity or credentials."""
         with self.lock:
             row = self._row(connection_id)
             config = json.loads(row["config"])
-            if config.get("platform") != "snowflake":
-                raise ValueError("Discovery selection is available for Snowflake only")
+            if config.get("platform") not in {"snowflake", "redshift"}:
+                raise ValueError("Discovery selection is available for Snowflake and Redshift")
+            if config.get("platform") == "redshift":
+                RedshiftConnectionInput.model_validate({**config, "objects": [o.model_dump() for o in value.objects]})
             config["objects"] = [obj.model_dump() for obj in value.objects]
             with self._database() as db:
                 changed = db.execute("""UPDATE connections SET config=?, version=version+1,
@@ -376,6 +409,19 @@ class ConnectionStore:
 def runtime_connector(config, secret):
     objects = {obj["name"]: DataObject(obj["catalog"], obj["schema_name"], obj["table_name"],
                                      tuple(obj["preview_columns"])) for obj in config["objects"]}
+    if config.get("platform") == "redshift":
+        from .redshift import RedshiftConnector, aws_error_code
+        import boto3
+        from botocore.config import Config as AWSConfig
+        from .models import ConnectorError
+        try:
+            session = boto3.Session(profile_name=config.get("aws_profile"), region_name=config["region"])
+            client = session.client("redshift-data", config=AWSConfig(
+                connect_timeout=5, read_timeout=15, retries={"mode": "standard", "total_max_attempts": 2}))
+        except Exception as error:
+            raise ConnectorError(aws_error_code(error)) from None
+        return RedshiftConnector(client, config["database"], objects,
+            workgroup_name=config.get("workgroup_name"), cluster_identifier=config.get("cluster_identifier"))
     if config.get("platform") == "snowflake":
         from .snowflake import SnowflakeConnector
         import snowflake.connector

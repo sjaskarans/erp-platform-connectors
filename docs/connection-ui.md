@@ -112,3 +112,14 @@ automatically, and deselecting an object does not revoke Snowflake grants.
 
 The screen is a reference integration client, not a separate client-facing product.
 See [team integration](team-integration.md) for SDK and API usage.
+
+## Amazon Redshift reference flow
+
+Choose **Amazon Redshift**, its region, database, deployment type, and workgroup
+name or cluster identifier. Enter the dedicated backend AWS profile name, or
+leave it blank for the host's workload provider chain. The profile stores no AWS
+keys or database passwords. Configure IAM and database read grants using
+[Redshift setup](redshift-setup.md), save/test, then use the same Browse data →
+selection → preview flow. Metadata browsing is scoped to the configured database;
+add another profile for a different database. This connector is offline-tested;
+a real Redshift smoke test is pending.

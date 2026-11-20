@@ -198,6 +198,31 @@ class DemoHTTPTests(unittest.TestCase):
             requests.delete(self.url + f'/v1/connections/{connection_id}', headers=self.headers,
                             timeout=5, proxies={'http': '', 'https': ''})
 
+    def test_redshift_profile_roundtrip_requires_no_stored_secret_or_aws_calls(self):
+        from test_redshift_profiles import profile
+        response = requests.post(self.url + '/v1/connections', headers=self.headers,
+            json=profile().model_dump(), timeout=5, proxies={'http': '', 'https': ''})
+        self.assertEqual(response.status_code, 201, response.text)
+        created = response.json()
+        self.assertFalse(created['secret_configured'])
+        self.assertEqual(created['platform'], 'redshift')
+        connection_id = created['id']
+        try:
+            selected = requests.post(self.url + f'/v1/connections/{connection_id}/selection', headers=self.headers,
+                json={'version': 1, 'objects': []}, timeout=5, proxies={'http': '', 'https': ''})
+            self.assertEqual(selected.status_code, 200, selected.text)
+            self.assertEqual(selected.json()['version'], 2)
+            self.assertEqual(self.get(f'/v1/connections/{connection_id}/setup').status_code, 400)
+            invalid = profile().model_dump()
+            invalid['aws_secret_access_key'] = 'sensitive-do-not-echo'
+            rejected = requests.post(self.url + '/v1/connections', headers=self.headers,
+                json=invalid, timeout=5, proxies={'http': '', 'https': ''})
+            self.assertEqual(rejected.status_code, 422)
+            self.assertNotIn('sensitive-do-not-echo', rejected.text)
+        finally:
+            requests.delete(self.url + f'/v1/connections/{connection_id}', headers=self.headers,
+                timeout=5, proxies={'http': '', 'https': ''})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,12 @@
+{
+  "platform": "redshift",
+  "name": "Client ERP Redshift",
+  "region": "us-east-1",
+  "deployment": "serverless",
+  "database": "dev",
+  "workgroup_name": "erp-analytics",
+  "aws_profile": "erp-connector",
+  "objects": [],
+  "queries": {},
+  "limits": {"max_rows": 1000, "max_bytes": 4000000, "timeout_seconds": 120}
+}

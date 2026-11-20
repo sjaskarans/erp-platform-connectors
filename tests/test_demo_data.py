@@ -87,6 +87,43 @@ class DemoDataTests(unittest.TestCase):
                 self.assertEqual(actual[0], target[0])
                 self.assertEqual([Decimal(str(v)) for v in actual[1:]], [Decimal(v) for v in target[1:]])
 
+    def test_generated_redshift_fixture_and_queries_reconcile_offline(self):
+        import duckdb
+        import re
+        from erp_connectors.connections import RedshiftConnectionInput
+        with tempfile.TemporaryDirectory() as directory:
+            generate('dev', 'erp_connector_demo_v1', Path(directory), 'redshift')
+            config = json.loads((Path(directory) / 'connector.demo.json').read_text())
+            expected = json.loads((Path(directory) / 'expected.json').read_text())
+            sql = (Path(directory) / 'setup.sql').read_text()
+            grants = (Path(directory) / 'grants.template.sql').read_text()
+        profile = RedshiftConnectionInput.model_validate({k: v for k, v in config.items() if k not in {'queries', 'limits'}})
+        self.assertEqual(len(profile.objects), 9)
+        self.assertNotIn('DROP ', sql)
+        self.assertNotIn('OR REPLACE', sql)
+        self.assertNotIn('ON FUTURE', grants)
+        db = duckdb.connect(':memory:')
+        try:
+            db.execute(sql)
+            for name, count in expected['row_counts'].items():
+                self.assertEqual(db.execute(f'SELECT COUNT(*) FROM erp_connector_demo_v1."{name}"').fetchone()[0], count)
+            self.assertEqual(db.execute('SELECT customer_id FROM erp_connector_demo_v1.customers LIMIT 1').fetchone()[0], '000001')
+            for name, query in config['queries'].items():
+                values = {'company_code': '1000', 'as_of_date': '2026-11-18'}
+                bindings = []
+                def bind(match):
+                    bindings.append(values[match.group(1)])
+                    return '?'
+                statement = re.sub(r':([A-Za-z_][A-Za-z0-9_]*)', bind, query['statement'])
+                rows = db.execute(statement, bindings).fetchall()
+                reference = expected['company_1000'][name]
+                self.assertEqual(len(rows), len(reference), name)
+                for row, target in zip(rows, reference):
+                    self.assertEqual(row[0], target[0], name)
+                    self.assertEqual([Decimal(str(v)) for v in row[1:]], [Decimal(v) for v in target[1:]], name)
+        finally:
+            db.close()
+
 
 if __name__ == "__main__":
     unittest.main()

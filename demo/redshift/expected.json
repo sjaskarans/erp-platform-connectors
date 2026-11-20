@@ -1,0 +1,62 @@
+{
+  "synthetic": true,
+  "as_of_date": "2026-11-18",
+  "row_counts": {
+    "companies": 3,
+    "customers": 3,
+    "suppliers": 2,
+    "finance_lines": 6,
+    "receivables": 7,
+    "payables": 3,
+    "inventory_positions": 4,
+    "sales_orders": 3,
+    "purchase_orders": 2
+  },
+  "company_1000": {
+    "finance_by_currency": [
+      [
+        "INR",
+        "200.00"
+      ],
+      [
+        "USD",
+        "50.00"
+      ]
+    ],
+    "overdue_receivables": [
+      [
+        "INR",
+        "600.00"
+      ],
+      [
+        "USD",
+        "50.00"
+      ]
+    ],
+    "overdue_payables": [
+      [
+        "INR",
+        "300.00"
+      ]
+    ],
+    "inventory_valuation": [
+      [
+        "INR",
+        "250.0000",
+        "1"
+      ]
+    ],
+    "open_sales_orders": [
+      [
+        "INR",
+        "1200.00"
+      ]
+    ],
+    "open_purchase_orders": [
+      [
+        "INR",
+        "500.00"
+      ]
+    ]
+  }
+}

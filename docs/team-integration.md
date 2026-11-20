@@ -1,4 +1,4 @@
-# Connector handoff: v0.2.0
+# Connector handoff: v0.3.0
 
 This repository delivers the connector layer for integration into the larger
 application. Each client installation has its own configuration and credentials.
@@ -7,16 +7,18 @@ The Python connector classes can be used directly by the team's existing backend
 
 ## What is implemented
 
-| Capability | Snowflake | Google Cloud Databricks |
-| --- | --- | --- |
-| Service identity | RSA key-pair, TYPE=SERVICE | Service principal, OAuth M2M |
-| Connection check | Implemented and live verified | Implemented; SDK contract tested offline |
-| Browse databases, schemas, tables/views, columns | Implemented and live verified | Not implemented; approved-object configuration remains |
-| Describe approved objects and preview approved columns | Implemented and live verified | Implemented; tested offline |
-| Registered parameterized SELECT templates | Implemented; driver behavior tested | Implemented; SDK behavior tested |
-| Local Windows encrypted profiles | Included | Included |
+| Capability | Snowflake | Google Cloud Databricks | Amazon Redshift |
+| --- | --- | --- | --- |
+| Service identity | RSA key-pair, TYPE=SERVICE | Service principal, OAuth M2M | AWS IAM role/provider chain; temporary credentials |
+| Connection check | Live verified | SDK contract tested offline | Serverless/provisioned SDK contracts tested offline |
+| Browse databases, schemas, tables/views, columns | Live verified | Approved-object configuration remains | Configured database + local schemas/tables/views/columns; offline tested |
+| Describe and preview selected objects/columns | Live verified | Tested offline | Tested offline |
+| Registered parameterized query templates | Official driver tested | Official SDK tested | Official AWS SDK + Stubber tested; exact decimals retained |
+| Reference profile storage | Windows-encrypted credentials | Windows-encrypted credentials | Non-secret target/provider settings only |
 
-SAP and Redshift connectors are not implemented in this release. Business
+Direct SAP is not implemented in this release. Redshift setup and least-privilege
+IAM policy templates are in [the Redshift guide](redshift-setup.md). No Redshift
+environment exists for a live smoke test yet. Business
 semantics, joins, AI decisions, visualization, application sign-in, and user
 authorization belong to the larger application.
 
@@ -42,7 +44,31 @@ API documentation; `docs/openapi.json` is the checked-in service contract.
 The sample-data panel runs a separate local fixture. A saved Snowflake profile
 always uses that profile's real account and service identity.
 
-## Client workflow without typing table names
+## Redshift integration
+
+The Redshift adapter follows the same `check_connection`, `describe`, `preview`,
+`execute`, and `browse` interfaces. Create a signed `redshift-data` boto3 client
+using the client's dedicated IAM role and instantiate the exported
+`RedshiftConnector`. Choose exactly one `workgroup_name` (Serverless) or
+`cluster_identifier` (provisioned), plus the configured database. Close the
+connector/client at the end of its request or application lifecycle.
+
+The reference API accepts `platform: "redshift"`, `region`, `deployment`,
+`database`, the appropriate target name, optional `aws_profile`, and selected
+`objects`. It stores no AWS credentials; a profile name refers to AWS configuration
+owned by the backend operator. Omit it to use the host workload's provider chain.
+The host must configure and authorize that provider for the correct client.
+
+Browse/selection/preview/test endpoints are shared across Snowflake and Redshift.
+The Snowflake `setup` endpoint generates public-key SQL only for Snowflake;
+Redshift uses administrator-configured IAM and database grants, as documented in
+[Redshift setup](redshift-setup.md). Redshift named parameters use `:name`, not
+Snowflake's qmark syntax. SQL NULL and empty-string bindings require explicit
+approved template variants. Each Redshift profile/SDK instance is scoped to one
+database; external/Spectrum and late-binding view discovery are outside this
+release's metadata support.
+
+## Client workflow without typing table names (Snowflake)
 
 1. The client enters account, warehouse, and dedicated service identity names.
 2. Their administrator chooses the access boundary. The schema-discovery option
@@ -124,8 +150,9 @@ result = connector.execute("finance_total", {"company_code": "1000"})
 See `connections.runtime_connector()` for the reference service-identity factory.
 `ConnectionStore` accepts a `vault` with `protect(str)->bytes` and
 `reveal(bytes)->str` if the host application supplies its own secret provider.
-The default vault uses Windows DPAPI under the Windows user running the backend.
-The core SDK itself has no dependency on Windows profile persistence.
+The default credential vault uses Windows DPAPI under the Windows user running the backend.
+The core SDK itself has no dependency on Windows profile persistence. Redshift
+settings use no credential vault because AWS credentials are obtained externally.
 
 ## Reference HTTP contract
 
@@ -135,7 +162,7 @@ token is not a replacement for business-user authentication or authorization.
 
 | Endpoint | Purpose |
 | --- | --- |
-| `POST /v1/connections` | Save account/identity settings; generate a Snowflake key if omitted |
+| `POST /v1/connections` | Save target/identity settings; generate a Snowflake key if omitted; Redshift uses the AWS provider |
 | `GET /v1/connections` | Public profile metadata, versions, statuses; no credentials |
 | `GET /v1/connections/{id}/setup` | Public key, fingerprint, administrator SQL, read-only diagnostic SQL |
 | `POST /v1/connections/{id}/test` | Test login and selected-object metadata/preview access |
@@ -168,7 +195,7 @@ The selection endpoint checks object/column visibility before saving, preserves
 the key and identity, increments the version, and resets test status. A stale
 version returns 409; reload and reconcile the selection. No raw SQL, identity
 fields, or credentials are accepted by this endpoint. Empty selection is allowed
-for initial onboarding and metadata-only discovery.
+for Snowflake and Redshift onboarding and metadata-only discovery.
 
 Profile state progression is `saved` → `connected` (no objects selected), or
 `saved` → `verified` (selected metadata and configured previews checked). Failed
@@ -206,8 +233,8 @@ Run `python -m unittest discover -s tests`; run `npm.cmd --prefix frontend run b
 when changing the reference UI. Tests cover async metadata initialization,
 financial precision, bounded reads, injection/binding, discovery pagination,
 secret redaction, selection validation/version races, and gateway behavior.
-Live Snowflake validation uses the pilot's actual service identity. Databricks
-still requires a client workspace live smoke test before deployment.
+Live Snowflake validation uses the pilot's actual service identity. Databricks and Redshift
+still require a client environment live smoke test before deployment.
 
 Build a reusable wheel with:
 
@@ -215,7 +242,7 @@ Build a reusable wheel with:
 python -m pip wheel . --no-deps --no-build-isolation --wheel-dir dist
 ```
 
-Share the private repository/release commit, wheel, this guide, and OpenAPI
+Share the repository/release commit, wheel, this guide, and OpenAPI
 contract with the team. Never share `.local-connections`, private keys, tokens,
 client connection exports, or local logs. The package is ready for the team's
 integration and acceptance testing; this reference application is not a complete

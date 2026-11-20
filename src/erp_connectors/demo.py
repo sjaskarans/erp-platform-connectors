@@ -40,7 +40,7 @@ def main():
             child_environment = dict(environment)
             if module == "gateway":
                 child_environment = {key: value for key, value in child_environment.items()
-                                     if not key.startswith(("DATABRICKS_", "SNOWFLAKE_"))}
+                                     if not key.startswith(("DATABRICKS_", "SNOWFLAKE_", "AWS_")) and key != "BOTO_CONFIG"}
             children.append(subprocess.Popen(
                 [sys.executable, "-m", "uvicorn", f"erp_connectors.{module}:create_app",
                  "--factory", "--host", "127.0.0.1", "--port", str(port), "--no-access-log"],
@@ -49,7 +49,7 @@ def main():
             ))
         if args.ui:
             ui_environment = {key: value for key, value in environment.items()
-                              if not key.startswith(("DATABRICKS_", "SNOWFLAKE_"))}
+                              if not key.startswith(("DATABRICKS_", "SNOWFLAKE_", "AWS_")) and key != "BOTO_CONFIG"}
             children.append(subprocess.Popen(
                 [node, str(next_bin), "dev", "--hostname", "127.0.0.1", "--port", str(ports[2])],
                 cwd=frontend, env=ui_environment,

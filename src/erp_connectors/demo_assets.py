@@ -7,9 +7,25 @@ from .demo_data import TABLES, configuration, seed_sql
 
 
 def generate(catalog: str, schema: str, destination: Path, platform="databricks"):
-    if platform not in {"databricks", "snowflake"}:
+    if platform not in {"databricks", "snowflake", "redshift"}:
         raise ValueError("Unsupported demo platform")
-    if platform == "snowflake":
+    if platform == "redshift":
+        seed_sql(catalog, schema)  # Require safe names and a dedicated test schema.
+        from .redshift import quote_identifier
+        quote_identifier(catalog)
+        quote_identifier(schema)
+        from .demo_data import literal
+        statements = ["-- Synthetic Redshift fixture: run as a setup owner in the configured database.",
+                      "-- Stop on the first error; use a fresh schema, never replace existing client data.",
+                      f'CREATE SCHEMA "{schema}";']
+        for name, spec in TABLES.items():
+            columns = ", ".join(f'"{column}" {"VARCHAR(256)" if kind == "STRING" else kind}' for column, kind in spec.columns)
+            table = f'"{schema}"."{name}"'
+            statements.append(f"CREATE TABLE {table} ({columns});")
+            values = ["(" + ", ".join(literal(value, kind) for value, (_, kind) in zip(row, spec.columns)) + ")" for row in spec.rows]
+            statements.append(f"INSERT INTO {table} VALUES\n" + ",\n".join(values) + ";")
+        sql = "\n\n".join(statements) + "\n"
+    elif platform == "snowflake":
         catalog, schema = catalog.upper(), schema.upper()
         # Validate with the same restricted naming rules before SQL generation.
         seed_sql(catalog, schema.lower())
@@ -64,18 +80,37 @@ def generate(catalog: str, schema: str, destination: Path, platform="databricks"
             f'GRANT USAGE ON SCHEMA "{catalog}"."{schema}" TO ROLE ERP_CONNECTOR_READER;\n'
             + "\n".join(f'GRANT SELECT ON TABLE "{catalog}"."{schema}"."{name.upper()}" TO ROLE ERP_CONNECTOR_READER;' for name in TABLES)
             + "\n-- Grant USAGE on the selected warehouse separately.\n")
+    if platform == "redshift":
+        for query in config["queries"].values():
+            query["statement"] = query["statement"].replace(f'`{catalog}`.`{schema}`.', f'"{schema}".').replace('`', '"')
+            query["statement"] = query["statement"].replace(":as_of_date", "CAST(:as_of_date AS DATE)")
+        config["objects"] = [{"name": name, "catalog": obj["catalog"], "schema_name": obj["schema"],
+                              "table_name": obj["name"], "preview_columns": obj["preview_columns"]}
+                             for name, obj in config["objects"].items()]
+        config.update(platform="redshift", name="Redshift synthetic ERP", region="us-east-1", deployment="serverless",
+                      database=catalog, workgroup_name="erp-test", aws_profile="erp-connector")
+        outputs["connector.demo.json"] = json.dumps(config, indent=2) + "\n"
+        outputs["grants.template.sql"] = (
+            "-- Run as an administrator in the configured Redshift database.\n"
+            "-- Replace IAMR:ERPConnectorRole with the exact database identity returned by the connection check.\n"
+            "-- Create the role only if it does not already exist; stop on errors.\n"
+            "CREATE ROLE erp_connector_reader;\n"
+            f'GRANT USAGE ON SCHEMA "{schema}" TO ROLE erp_connector_reader;\n'
+            + "\n".join(f'GRANT SELECT ON TABLE "{schema}"."{name}" TO ROLE erp_connector_reader;' for name in TABLES)
+            + '\nGRANT ROLE erp_connector_reader TO "IAMR:ERPConnectorRole";\n'
+            + "-- No CREATE/write privileges, future grants, or changes to PUBLIC are applied here.\n")
     for name, content in outputs.items():
         (destination / name).write_text(content, encoding="utf-8", newline="\n")
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate synthetic Databricks setup assets; no cloud calls")
+    parser = argparse.ArgumentParser(description="Generate synthetic connector setup assets; no cloud calls")
     parser.add_argument("--catalog", default="erp_demo")
     parser.add_argument("--schema", default="erp_connector_demo_v1")
-    parser.add_argument("--platform", choices=["databricks", "snowflake"], default="databricks")
+    parser.add_argument("--platform", choices=["databricks", "snowflake", "redshift"], default="databricks")
     parser.add_argument("--out", type=Path)
     args = parser.parse_args()
-    destination = args.out or Path("demo/snowflake" if args.platform == "snowflake" else "demo/generated")
+    destination = args.out or Path(f"demo/{args.platform}" if args.platform != "databricks" else "demo/generated")
     generate(args.catalog, args.schema, destination, args.platform)
     print(f"Generated {args.platform} setup SQL, reader grants, connector config, and expected results in {destination}")
 
