@@ -123,3 +123,11 @@ keys or database passwords. Configure IAM and database read grants using
 selection → preview flow. Metadata browsing is scoped to the configured database;
 add another profile for a different database. This connector is offline-tested;
 a real Redshift smoke test is pending.
+
+## SAP OData
+
+Choose SAP OData for a released SAP service. The reference form stores the dedicated
+communication user password encrypted on Windows. The backend operator approves exact
+service roots before connection. Browse namespaces, entities and scalar properties;
+metadata access alone does not verify business data access. Follow [SAP setup](sap-setup.md)
+for source identity/permissions, supported authentication and live acceptance checks.

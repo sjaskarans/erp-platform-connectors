@@ -1,0 +1,1 @@
+{"d":{"results":[{"CompanyCode":"1000","DocumentNumber":"0000000001","Amount":"200.00","Currency":"INR","IsReversed":false,"PostingDate":"/Date(1794950400000)/"},{"CompanyCode":"1000","DocumentNumber":"0000000002","Amount":"9007199254740993.25","Currency":"INR","IsReversed":false,"PostingDate":null}],"__next":"FinanceLines?$skiptoken=page2"}}

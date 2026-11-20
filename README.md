@@ -3,20 +3,21 @@
 Python connector implementation for the existing ERP data used by the governed
 intelligence platform. Implemented targets are **Google Cloud Databricks with
 Unity Catalog**, **Snowflake with service-user RSA key-pair authentication**,
-and **Amazon Redshift through the IAM-authenticated Data API**. Direct SAP is
-the remaining connector in this implementation sequence.
+**Amazon Redshift through the IAM-authenticated Data API**, and **SAP via
+read-only OData v2/v4 APIs**. SAP product/API availability and inbound identity
+setup are client-specific; see [SAP setup](docs/sap-setup.md).
 
 The connector retrieves metadata and data. Metric definitions, join inference,
 semantic compilation, AI, dashboards, and ERP write-back are outside this package.
 
 ## Team handoff
 
-Start with [the v0.3.0 integration guide](docs/team-integration.md) and
+Start with [the v0.4.0 integration guide](docs/team-integration.md) and
 [the OpenAPI contract](docs/openapi.json). The reusable Python SDK is the
 connector deliverable; the local Next.js screen and API processes demonstrate
 how the team's larger application can call it.
 
-Snowflake and Redshift support paginated metadata discovery and versioned object/column
+Snowflake, Redshift and SAP support paginated metadata discovery and versioned object/column
 selection. Clients can browse and choose accessible tables without typing each
 object name. An administrator still approves the source access boundary once.
 Databricks currently retains its approved-object configuration flow.
@@ -27,7 +28,9 @@ Databricks currently retains its approved-object configuration flow.
 - Snowflake service-user key-pair authentication through the official Python driver.
 - Redshift Serverless/provisioned support through boto3, using temporary IAM
   credentials, named parameters, complete result pagination, and bounded reads.
-- Connection check against a configured SQL warehouse.
+- SAP OData metadata/entity discovery, explicit scalar projections, typed registered
+  filters, bounded paging and exact numeric values through an authenticated HTTP session.
+- Connection checks against the configured source (SAP checks metadata access).
 - Column metadata for approved objects, including source types. Comments are
   included by the Databricks and Snowflake adapters.
 - Optional previews restricted to explicitly approved columns.
@@ -37,7 +40,7 @@ Databricks currently retains its approved-object configuration flow.
   misleading totals.
 - String/null result cells with source column type metadata retained.
   Consumers must parse DECIMAL using decimal arithmetic, never binary floats.
-- Structured execution logs containing statement IDs, SQL fingerprints, timing,
+- Warehouse adapter structured execution logs containing statement IDs, SQL fingerprints, timing,
   and outcome; query text, parameter values, and result rows are excluded.
 
 The package includes a command-line tool and two separate local HTTP test
@@ -53,7 +56,7 @@ arbitrary SQL through these endpoints.
 For a user-facing setup screen, run `python -m erp_connectors.demo --ui` with the
 project's Python environment. Open `http://127.0.0.1:3000` to add, edit, test, or
 preview your own named connections. See [the connection UI guide](docs/connection-ui.md).
-Select Databricks, Snowflake, or Amazon Redshift when adding a connection. For Redshift IAM roles, policies, and synthetic test data, use [the Redshift setup guide](docs/redshift-setup.md). For Snowflake customer onboarding, the app generates and protects its private key and displays public-key setup SQL. If your ERP data is already loaded, follow [customer testing](docs/snowflake-customer-testing.md). Snowflake's identity,
+Select Databricks, Snowflake, Amazon Redshift, or SAP OData when adding a connection. For SAP identities, service approval, and offline fixtures, use [SAP setup](docs/sap-setup.md). For Redshift IAM roles, policies, and synthetic test data, use [the Redshift setup guide](docs/redshift-setup.md). For Snowflake customer onboarding, the app generates and protects its private key and displays public-key setup SQL. If your ERP data is already loaded, follow [customer testing](docs/snowflake-customer-testing.md). Snowflake's identity,
 permissions, CLI, and test-data setup are covered in [the Snowflake guide](docs/snowflake-setup.md).
 Saved profiles use Windows-encrypted secrets and are local to this deployment;
 the reference API/UI is intended for integration into the larger application. Redshift profiles contain only non-secret target/provider settings.

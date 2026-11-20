@@ -4,7 +4,7 @@ from typing import Any, Literal, NotRequired, Protocol, TypedDict
 
 class MetadataItem(TypedDict):
     name: str
-    kind: NotRequired[Literal["TABLE", "VIEW"]]
+    kind: NotRequired[Literal["TABLE", "VIEW", "ENTITY"]]
     type: NotRequired[str]
 
 

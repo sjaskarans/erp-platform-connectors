@@ -1,4 +1,4 @@
-# Connector handoff: v0.3.0
+# Connector handoff: v0.4.0
 
 This repository delivers the connector layer for integration into the larger
 application. Each client installation has its own configuration and credentials.
@@ -16,7 +16,12 @@ The Python connector classes can be used directly by the team's existing backend
 | Registered parameterized query templates | Official driver tested | Official SDK tested | Official AWS SDK + Stubber tested; exact decimals retained |
 | Reference profile storage | Windows-encrypted credentials | Windows-encrypted credentials | Non-secret target/provider settings only |
 
-Direct SAP is not implemented in this release. Redshift setup and least-privilege
+SAP OData v2/v4 is implemented as the fourth adapter. Its service-specific identity,
+permissions, SDK/API integration and offline test steps are in [SAP setup](sap-setup.md).
+The reference form uses a dedicated communication user; host-managed certificate/token
+transports can be injected into the SDK. SAP has not been tested against a live tenant.
+
+Redshift setup and least-privilege
 IAM policy templates are in [the Redshift guide](redshift-setup.md). No Redshift
 environment exists for a live smoke test yet. Business
 semantics, joins, AI decisions, visualization, application sign-in, and user
@@ -59,7 +64,7 @@ The reference API accepts `platform: "redshift"`, `region`, `deployment`,
 owned by the backend operator. Omit it to use the host workload's provider chain.
 The host must configure and authorize that provider for the correct client.
 
-Browse/selection/preview/test endpoints are shared across Snowflake and Redshift.
+Browse/selection/preview/test endpoints are shared across Snowflake, Redshift and SAP.
 The Snowflake `setup` endpoint generates public-key SQL only for Snowflake;
 Redshift uses administrator-configured IAM and database grants, as documented in
 [Redshift setup](redshift-setup.md). Redshift named parameters use `:name`, not
@@ -195,7 +200,7 @@ The selection endpoint checks object/column visibility before saving, preserves
 the key and identity, increments the version, and resets test status. A stale
 version returns 409; reload and reconcile the selection. No raw SQL, identity
 fields, or credentials are accepted by this endpoint. Empty selection is allowed
-for Snowflake and Redshift onboarding and metadata-only discovery.
+for Snowflake, Redshift and SAP onboarding and metadata-only discovery.
 
 Profile state progression is `saved` → `connected` (no objects selected), or
 `saved` → `verified` (selected metadata and configured previews checked). Failed
@@ -207,7 +212,8 @@ columns are checked for metadata visibility only, not proof of SELECT access.
 - The reference profile/API supports 30 selected objects and 30 preview columns
   per object. Larger selections need deliberate API/result-budget changes or
   multiple profiles. The direct SDK's approved registry has no 30-object limit.
-- Preview limit: 1–100 rows. Default SDK result budgets: 1,000 rows and 4 MB.
+- Preview limit: 1–100 rows. Warehouse SDK default result budgets: 1,000 rows and 4 MB. SAP defaults
+  to 10,000 rows, 8 MB per metadata/read operation and 100 data pages.
   Budget violations fail rather than returning partial analytical results.
 - Operation timeout defaults to 120 seconds. Network/login timeouts are separate;
   multiple selected objects can make an HTTP verification exceed gateway limits.
@@ -233,7 +239,7 @@ Run `python -m unittest discover -s tests`; run `npm.cmd --prefix frontend run b
 when changing the reference UI. Tests cover async metadata initialization,
 financial precision, bounded reads, injection/binding, discovery pagination,
 secret redaction, selection validation/version races, and gateway behavior.
-Live Snowflake validation uses the pilot's actual service identity. Databricks and Redshift
+Live Snowflake validation uses the pilot's actual service identity. Databricks, Redshift and SAP
 still require a client environment live smoke test before deployment.
 
 Build a reusable wheel with:

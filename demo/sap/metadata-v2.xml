@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<edmx:Edmx Version="1.0" xmlns:edmx="http://schemas.microsoft.com/ado/2007/06/edmx">
+ <edmx:DataServices xmlns:m="http://schemas.microsoft.com/ado/2007/08/dataservices/metadata" m:DataServiceVersion="2.0">
+  <Schema Namespace="ERP_DEMO" Alias="Demo" xmlns="http://schemas.microsoft.com/ado/2008/09/edm" xmlns:sap="http://www.sap.com/Protocols/SAPData">
+   <EntityType Name="FinanceLine">
+    <Key><PropertyRef Name="CompanyCode"/><PropertyRef Name="DocumentNumber"/></Key>
+    <Property Name="CompanyCode" Type="Edm.String" Nullable="false" MaxLength="4" sap:label="Company code"/>
+    <Property Name="DocumentNumber" Type="Edm.String" Nullable="false" MaxLength="10"/>
+    <Property Name="Amount" Type="Edm.Decimal" Precision="23" Scale="2" sap:unit="Currency"/>
+    <Property Name="Currency" Type="Edm.String" MaxLength="3" sap:semantics="currency-code"/>
+    <Property Name="IsReversed" Type="Edm.Boolean" Nullable="false"/>
+    <Property Name="PostingDate" Type="Edm.DateTime"/>
+    <NavigationProperty Name="ToCompany" Relationship="Demo.CompanyFinance" FromRole="Finance" ToRole="Company"/>
+   </EntityType>
+   <EntityContainer Name="ERP_DEMO_Entities" m:IsDefaultEntityContainer="true">
+    <EntitySet Name="FinanceLines" EntityType="Demo.FinanceLine" sap:creatable="false" sap:updatable="false" sap:deletable="false"/>
+   </EntityContainer>
+  </Schema>
+ </edmx:DataServices>
+</edmx:Edmx>

@@ -37,6 +37,9 @@ def create_app(connector=None):
         elif mode == "snowflake":
             from .cli import load_snowflake_connector
             connector = load_snowflake_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
+        elif mode == "sap":
+            from .cli import load_sap_connector
+            connector = load_sap_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
         elif mode == "redshift":
             from .cli import load_redshift_connector
             connector = load_redshift_connector(os.environ.get("ERP_CONNECTOR_CONFIG", "connector.local.json"))
@@ -142,8 +145,8 @@ def create_app(connector=None):
         live = None
         try:
             config, secret, _ = store.runtime(connection_id)
-            if config.get("platform") not in {"snowflake", "redshift"}:
-                raise ValueError("Data browsing is available for Snowflake and Redshift")
+            if config.get("platform") not in {"snowflake", "redshift", "sap"}:
+                raise ValueError("Data browsing is available for Snowflake, Redshift and SAP")
             live = runtime_connector(config, secret)
             return live.browse(**body.model_dump())
         except KeyError:
@@ -164,8 +167,8 @@ def create_app(connector=None):
             config, secret, version = store.runtime(connection_id)
             if version != body.version:
                 raise HTTPException(409, "Connection changed; reopen Browse data before saving")
-            if config.get("platform") not in {"snowflake", "redshift"}:
-                raise HTTPException(400, "Data selection is available for Snowflake and Redshift")
+            if config.get("platform") not in {"snowflake", "redshift", "sap"}:
+                raise HTTPException(400, "Data selection is available for Snowflake, Redshift and SAP")
             if body.objects:
                 live = runtime_connector(config, secret)
             # Validate against live metadata; never accept invented column names.

@@ -93,12 +93,31 @@ def load_redshift_connector(path: str):
         workgroup_name=profile.workgroup_name, cluster_identifier=profile.cluster_identifier, **config.get("limits", {}))
 
 
+def load_sap_connector(path, password=None):
+    from .connections import SAPConnectionInput, runtime_connector
+    from .sap import ODataFilter, ODataQueryTemplate
+    config = json.loads(Path(path).read_text(encoding="utf-8"))
+    if "password" in config:
+        raise ValueError("Keep SAP passwords out of configuration files")
+    profile = SAPConnectionInput.model_validate({k: v for k, v in config.items() if k != "queries"})
+    secret = password if password is not None else os.environ.get("SAP_PASSWORD")
+    if not secret:
+        raise ValueError("Provide a SAP password through the secure prompt or backend environment")
+    queries = {name: ODataQueryTemplate(q["object_id"], tuple(q["select"]),
+                   tuple(ODataFilter(**f) for f in q.get("filters", [])), tuple(q.get("order_by", [])))
+                   for name, q in config.get("queries", {}).items()}
+    live = runtime_connector(profile.model_dump(exclude={"password"}), secret)
+    live.queries = queries
+    # Limits are configured through the SDK constructor; CLI retains safe defaults.
+    return live
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read-only ERP platform connector")
     parser.add_argument("--config", default="connector.local.json")
-    parser.add_argument("--platform", choices=["databricks", "snowflake", "redshift"], default="databricks")
+    parser.add_argument("--platform", choices=["databricks", "snowflake", "redshift", "sap"], default="databricks")
     parser.add_argument("--prompt-secret", action="store_true",
-                        help="Prompt for the Databricks OAuth secret or Snowflake key passphrase")
+                        help="Prompt for the Databricks OAuth secret, Snowflake key passphrase or SAP communication password")
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check")
     commands.add_parser("discover")
@@ -122,7 +141,14 @@ def main() -> int:
     logging.getLogger("erp_connectors").setLevel(logging.INFO)
     connector = None
     try:
-        if args.platform == "redshift":
+        if args.platform == "sap":
+            password = None
+            if args.prompt_secret:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", getpass.GetPassWarning)
+                    password = getpass.getpass("SAP communication user password (hidden): ")
+            connector = load_sap_connector(args.config, password=password)
+        elif args.platform == "redshift":
             if args.prompt_secret:
                 raise ValueError("Redshift uses the AWS credential provider, not a password prompt")
             connector = load_redshift_connector(args.config)

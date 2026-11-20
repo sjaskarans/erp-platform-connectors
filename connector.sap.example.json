@@ -1,0 +1,19 @@
+{
+  "platform": "sap",
+  "name": "Client SAP finance",
+  "service_url": "https://sap-api.example.com/sap/opu/odata/sap/API_SERVICE/",
+  "odata_version": "2",
+  "username": "SVC_ERP_CONNECTOR",
+  "objects": [{
+    "name": "finance", "catalog": "service", "schema_name": "ERP_DEMO",
+    "table_name": "FinanceLines", "object_kind": "ENTITY",
+    "preview_columns": ["CompanyCode", "DocumentNumber", "Amount", "Currency"]
+  }],
+  "queries": {
+    "company_finance": {
+      "object_id": "finance", "select": ["CompanyCode", "DocumentNumber", "Amount", "Currency"],
+      "filters": [{"property": "CompanyCode", "operator": "eq", "parameter": "company"}],
+      "order_by": ["CompanyCode", "DocumentNumber"]
+    }
+  }
+}

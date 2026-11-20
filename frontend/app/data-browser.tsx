@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./connector-api";
 
-export type SelectedObject = { name: string; catalog: string; schema_name: string; table_name: string; object_kind?: "TABLE" | "VIEW"; preview_columns: string[] };
-type Item = { name: string; kind?: "TABLE" | "VIEW"; type?: string };
+export type SelectedObject = { name: string; catalog: string; schema_name: string; table_name: string; object_kind?: "TABLE" | "VIEW" | "ENTITY"; preview_columns: string[] };
+type Item = { name: string; kind?: "TABLE" | "VIEW" | "ENTITY"; type?: string };
 type Page = { items: Item[]; next_cursor: string | null };
 type Location = { database: string; schema_name: string; table: string };
-type Props = { platform: "snowflake" | "redshift"; id: string; version: number; initial: SelectedObject[]; onSaved: () => Promise<void>; onClose: () => void };
+type Props = { platform: "snowflake" | "redshift" | "sap"; id: string; version: number; initial: SelectedObject[]; onSaved: () => Promise<void>; onClose: () => void };
 const keyOf = (o: SelectedObject) => JSON.stringify([o.catalog, o.schema_name, o.table_name]);
 const newLabel = () => `object_${crypto.randomUUID().replaceAll("-", "")}`;
 
@@ -91,10 +91,10 @@ export default function DataBrowser({ platform, id, version, initial, onSaved, o
     if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes.at(-1)?.focus(); }
     else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
   }}>
-    <div className="dialog-head"><div><span className="eyebrow">{platform === "redshift" ? "AMAZON REDSHIFT" : "SNOWFLAKE"} · DATA SELECTION</span><h2 id="browser-title">Browse your data</h2><p>Choose from objects visible to your service role.</p></div><button aria-label="Close data browser" disabled={saving} onClick={close}>✕</button></div>
+    <div className="dialog-head"><div><span className="eyebrow">{platform === "sap" ? "SAP ODATA" : platform === "redshift" ? "AMAZON REDSHIFT" : "SNOWFLAKE"} · DATA SELECTION</span><h2 id="browser-title">Browse your data</h2><p>{platform === "sap" ? "Browse this service’s namespaces, entities and scalar properties. Metadata visibility does not prove row access." : "Choose from objects visible to your service role."}</p></div><button aria-label="Close data browser" disabled={saving} onClick={close}>✕</button></div>
     <div className="dialog-body">
-      <div className="browser-path"><button className="text-button" disabled={saving} onClick={() => navigate({ database: "", schema_name: "", table: "" })}>Databases</button>{location.database && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ database: location.database, schema_name: "", table: "" })}>{location.database}</button></>}{location.schema_name && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ ...location, table: "" })}>{location.schema_name}</button></>}{location.table && <span>/ {location.table}</span>}</div>
-      <form className="browser-search" onSubmit={event => { event.preventDefault(); void load(location, "", prefix); }}><label>Search {level}<input value={prefix} disabled={saving} maxLength={255} onChange={e => setPrefix(e.target.value)} placeholder="Name starts with…"/><small>Exact case, usually {platform === "redshift" ? "lowercase" : "uppercase"}. Results load in pages of 100.</small></label><button className="secondary" disabled={loading || saving}>Search</button></form>
+      <div className="browser-path"><button className="text-button" disabled={saving} onClick={() => navigate({ database: "", schema_name: "", table: "" })}>{platform === "sap" ? "Service" : "Databases"}</button>{location.database && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ database: location.database, schema_name: "", table: "" })}>{location.database}</button></>}{location.schema_name && <><span>/</span><button className="text-button" disabled={saving} onClick={() => navigate({ ...location, table: "" })}>{location.schema_name}</button></>}{location.table && <span>/ {location.table}</span>}</div>
+      <form className="browser-search" onSubmit={event => { event.preventDefault(); void load(location, "", prefix); }}><label>Search {level}<input value={prefix} disabled={saving} maxLength={255} onChange={e => setPrefix(e.target.value)} placeholder="Name starts with…"/><small>Exact case{platform === "sap" ? ", as published by SAP" : platform === "redshift" ? ", usually lowercase" : ", usually uppercase"}. Results load in pages of 100.</small></label><button className="secondary" disabled={loading || saving}>Search</button></form>
       <div className="browser-summary"><strong>{selection.length}/30 objects selected</strong>{(level === "objects" || level === "columns") && <button className="text-button" disabled={loading || saving || !items.length || (level === "columns" && !active)} onClick={selectVisible}>Select listed {level === "objects" ? "objects" : "columns"}</button>}</div>
       {error && <div role="alert" className="notice error">{error}</div>}
       {level === "columns" && <p>{active ? `${active.preview_columns.length}/30 preview columns selected. No columns means metadata access only in the app.` : "Select this object before choosing preview columns."}</p>}

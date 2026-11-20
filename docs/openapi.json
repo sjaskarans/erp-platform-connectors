@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ERP connector reference service",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "paths": {
     "/v1/connections": {
@@ -41,6 +41,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/RedshiftConnectionInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SAPConnectionInput"
                   }
                 ],
                 "title": "Body"
@@ -110,6 +113,9 @@
                   },
                   {
                     "$ref": "#/components/schemas/RedshiftConnectionInput"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SAPConnectionInput"
                   }
                 ],
                 "title": "Body"
@@ -811,7 +817,8 @@
             "type": "string",
             "enum": [
               "TABLE",
-              "VIEW"
+              "VIEW",
+              "ENTITY"
             ],
             "title": "Object Kind",
             "default": "TABLE"
@@ -969,6 +976,86 @@
           "database"
         ],
         "title": "RedshiftConnectionInput"
+      },
+      "SAPConnectionInput": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "const": "sap",
+            "title": "Platform"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "service_url": {
+            "type": "string",
+            "maxLength": 2048,
+            "minLength": 10,
+            "title": "Service Url"
+          },
+          "odata_version": {
+            "type": "string",
+            "enum": [
+              "2",
+              "4"
+            ],
+            "title": "Odata Version",
+            "default": "2"
+          },
+          "sap_client": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{3}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sap Client"
+          },
+          "username": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Username"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 4096,
+                "minLength": 1,
+                "format": "password",
+                "writeOnly": true
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          },
+          "objects": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectInput"
+            },
+            "type": "array",
+            "maxItems": 30,
+            "title": "Objects"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "platform",
+          "name",
+          "service_url",
+          "username"
+        ],
+        "title": "SAPConnectionInput"
       },
       "SnowflakeAccessScope": {
         "properties": {

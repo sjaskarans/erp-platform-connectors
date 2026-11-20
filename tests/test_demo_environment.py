@@ -11,7 +11,7 @@ class DemoEnvironmentTests(unittest.TestCase):
     def test_cloud_credentials_are_passed_only_to_connector_process(self):
         environment = {'AWS_ACCESS_KEY_ID': 'offline-only', 'AWS_SECRET_ACCESS_KEY': 'offline-only',
             'AWS_SESSION_TOKEN': 'offline-only', 'AWS_WEB_IDENTITY_TOKEN_FILE': 'offline-token-file',
-            'BOTO_CONFIG': 'offline-config', 'AWS_PROFILE': 'erp-reader',
+            'SAP_PASSWORD': 'offline-only', 'ERP_SAP_ALLOWED_SERVICE_ROOTS': '[]', 'BOTO_CONFIG': 'offline-config', 'AWS_PROFILE': 'erp-reader',
             'DATABRICKS_CLIENT_SECRET': 'offline-only', 'SNOWFLAKE_PRIVATE_KEY_FILE': 'offline-only',
             'ERP_API_TOKEN': 'offline-local-api-token-' * 2}
         child = MagicMock()
@@ -26,6 +26,6 @@ class DemoEnvironmentTests(unittest.TestCase):
         self.assertEqual(connector_env['AWS_SECRET_ACCESS_KEY'], 'offline-only')
         for call in calls[1:]:
             process_env = call.kwargs['env']
-            self.assertFalse(any(key.startswith(('AWS_', 'DATABRICKS_', 'SNOWFLAKE_')) for key in process_env))
+            self.assertFalse(any(key.startswith(('AWS_', 'DATABRICKS_', 'SNOWFLAKE_', 'SAP_', 'ERP_SAP_')) for key in process_env))
             self.assertNotIn('BOTO_CONFIG', process_env)
             self.assertIn('ERP_API_TOKEN', process_env)

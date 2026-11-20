@@ -26,7 +26,7 @@ class ObjectInput(BaseModel):
     schema_name: str = Field(min_length=1, max_length=255)
     table_name: str = Field(min_length=1, max_length=255)
     preview_columns: list[str] = Field(default_factory=list, max_length=30)
-    object_kind: Literal["TABLE", "VIEW"] = "TABLE"
+    object_kind: Literal["TABLE", "VIEW", "ENTITY"] = "TABLE"
 
     @field_validator("name", "catalog", "schema_name", "table_name")
     @classmethod
@@ -83,6 +83,12 @@ class ConnectionInput(BaseModel):
             raise ValueError("Object labels must be unique")
         return objects
 
+    @model_validator(mode="after")
+    def warehouse_objects(self):
+        if any(o.object_kind == "ENTITY" for o in self.objects):
+            raise ValueError("Databricks objects must be tables or views")
+        return self
+
 
 class SnowflakeAccessScope(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -138,6 +144,12 @@ class SnowflakeConnectionInput(BaseModel):
             raise ValueError("Use an account identifier, not a URL or hostname")
         return value
 
+    @model_validator(mode="after")
+    def warehouse_objects(self):
+        if any(o.object_kind == "ENTITY" for o in self.objects):
+            raise ValueError("Snowflake objects must be tables or views")
+        return self
+
 
 class RedshiftConnectionInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
@@ -157,6 +169,8 @@ class RedshiftConnectionInput(BaseModel):
     def target(self):
         from .redshift import quote_identifier
         quote_identifier(self.database)
+        if any(o.object_kind == "ENTITY" for o in self.objects):
+            raise ValueError("Redshift objects must be tables or views")
         if self.deployment == "serverless" and (not self.workgroup_name or self.cluster_identifier):
             raise ValueError("Serverless requires a workgroup name only")
         if self.deployment == "provisioned" and (not self.cluster_identifier or self.workgroup_name):
@@ -169,8 +183,39 @@ class RedshiftConnectionInput(BaseModel):
         return self
 
 
-ConnectionPayload = ConnectionInput | SnowflakeConnectionInput | RedshiftConnectionInput
-SECRET_FIELDS = {"client_secret", "private_key_pem", "private_key_passphrase"}
+class SAPConnectionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    platform: Literal["sap"]
+    name: str = Field(min_length=1, max_length=100)
+    service_url: str = Field(min_length=10, max_length=2048)
+    odata_version: Literal["2", "4"] = "2"
+    sap_client: str | None = Field(default=None, pattern=r"^[0-9]{3}$")
+    username: str = Field(min_length=1, max_length=255)
+    password: SecretStr | None = Field(default=None, min_length=1, max_length=4096)
+    objects: list[ObjectInput] = Field(default_factory=list, max_length=30)
+    _name = field_validator("name")(ConnectionInput.display_name.__func__)
+    _username = field_validator("username")(ConnectionInput.display_name.__func__)
+    _objects = field_validator("objects")(ConnectionInput.unique_objects.__func__)
+
+    @field_validator("service_url")
+    @classmethod
+    def root(cls, value):
+        from .sap import service_root
+        return service_root(value)
+
+    @model_validator(mode="after")
+    def selected_entities(self):
+        from .sap import identifier
+        for obj in self.objects:
+            if obj.catalog != "service" or obj.object_kind != "ENTITY":
+                raise ValueError("Select SAP entities from this service")
+            for value in (obj.table_name, *obj.preview_columns):
+                identifier(value)
+        return self
+
+
+ConnectionPayload = ConnectionInput | SnowflakeConnectionInput | RedshiftConnectionInput | SAPConnectionInput
+SECRET_FIELDS = {"client_secret", "private_key_pem", "private_key_passphrase", "password"}
 
 
 def private_key_der(pem: str, passphrase: str | None = None) -> bytes:
@@ -296,6 +341,13 @@ class ConnectionStore:
                     raise ValueError("Provide the key when replacing its passphrase")
             elif isinstance(value, ConnectionInput) and value.client_secret:
                 plaintext = value.client_secret.get_secret_value()
+            elif isinstance(value, SAPConnectionInput):
+                if value.password is not None:
+                    plaintext = value.password.get_secret_value()
+                elif existing:
+                    previous = json.loads(existing["config"])
+                    if any(previous.get(k) != getattr(value, k) for k in ("service_url", "username", "sap_client")):
+                        raise ValueError("Provide the password again when changing the SAP target or identity")
             secret = (b"" if isinstance(value, RedshiftConnectionInput) else
                       self.vault.protect(plaintext) if plaintext is not None else existing["secret"] if existing else None)
             if secret is None:
@@ -321,10 +373,14 @@ class ConnectionStore:
         with self.lock:
             row = self._row(connection_id)
             config = json.loads(row["config"])
-            if config.get("platform") not in {"snowflake", "redshift"}:
-                raise ValueError("Discovery selection is available for Snowflake and Redshift")
+            if config.get("platform") not in {"snowflake", "redshift", "sap"}:
+                raise ValueError("Discovery selection is unavailable for this platform")
             if config.get("platform") == "redshift":
                 RedshiftConnectionInput.model_validate({**config, "objects": [o.model_dump() for o in value.objects]})
+            if config.get("platform") == "snowflake":
+                SnowflakeConnectionInput.model_validate({**config, "objects": [o.model_dump() for o in value.objects]})
+            if config.get("platform") == "sap":
+                SAPConnectionInput.model_validate({**config, "objects": [o.model_dump() for o in value.objects]})
             config["objects"] = [obj.model_dump() for obj in value.objects]
             with self._database() as db:
                 changed = db.execute("""UPDATE connections SET config=?, version=version+1,
@@ -409,6 +465,24 @@ class ConnectionStore:
 def runtime_connector(config, secret):
     objects = {obj["name"]: DataObject(obj["catalog"], obj["schema_name"], obj["table_name"],
                                      tuple(obj["preview_columns"])) for obj in config["objects"]}
+    if config.get("platform") == "sap":
+        from .sap import SAPConnector, service_root
+        from .models import ConnectorError
+        import requests
+        root = service_root(config["service_url"])
+        try:
+            allowed = json.loads(os.environ.get("ERP_SAP_ALLOWED_SERVICE_ROOTS", "[]"))
+            if not isinstance(allowed, list) or root not in {service_root(v) for v in allowed}:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ConnectorError("SAP_SERVICE_NOT_APPROVED") from None
+        session = requests.Session()
+        # Disable implicit .netrc/proxy credentials. Hosts can inject a managed
+        # transport into the SDK directly when corporate proxy/mTLS is required.
+        session.trust_env = False
+        session.auth = (config["username"], secret)
+        return SAPConnector(session, root, objects, odata_version=config["odata_version"],
+                            sap_client=config.get("sap_client"), owns_session=True)
     if config.get("platform") == "redshift":
         from .redshift import RedshiftConnector, aws_error_code
         import boto3
