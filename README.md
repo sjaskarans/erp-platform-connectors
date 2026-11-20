@@ -7,6 +7,9 @@ Unity Catalog**, **Snowflake with service-user RSA key-pair authentication**,
 read-only OData v2/v4 APIs**. SAP product/API availability and inbound identity
 setup are client-specific; see [SAP setup](docs/sap-setup.md).
 
+This project's selected SAP deployment is **S/4HANA Private Edition / on-premises**;
+follow [the dedicated administrator walkthrough](docs/sap-private-setup.md).
+
 The connector retrieves metadata and data. Metric definitions, join inference,
 semantic compilation, AI, dashboards, and ERP write-back are outside this package.
 

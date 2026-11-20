@@ -21,6 +21,9 @@ permissions, SDK/API integration and offline test steps are in [SAP setup](sap-s
 The reference form uses a dedicated communication user; host-managed certificate/token
 transports can be injected into the SDK. SAP has not been tested against a live tenant.
 
+The selected SAP target is **S/4HANA Private Edition / on-premises**. Use the
+[specific Gateway/technical-user onboarding guide](sap-private-setup.md) for this project.
+
 Redshift setup and least-privilege
 IAM policy templates are in [the Redshift guide](redshift-setup.md). No Redshift
 environment exists for a live smoke test yet. Business

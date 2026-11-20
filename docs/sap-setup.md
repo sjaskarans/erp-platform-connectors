@@ -1,5 +1,10 @@
 # SAP connector: client setup and team integration
 
+**Selected target: S/4HANA Private Edition / on-premises.** Start with the
+[deployment-specific administrator walkthrough](sap-private-setup.md), then use
+this guide for the SDK, API, local configuration and test contracts. Public
+Edition instructions below apply only to installations of that edition.
+
 The fourth adapter is **SAP OData v2/v4**, for released S/4HANA APIs or ECC /
 S/4HANA Gateway services that expose XML `$metadata` and JSON entity collections.
 It does not connect directly to SAP tables, HANA SQL, RFC/BAPI, SOAP, or Business
